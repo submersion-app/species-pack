@@ -5,8 +5,8 @@ scores instead of a verdict, so the accuracy scorer can try every bar.
 
 The two must not drift. This module writes testdata/naming_vectors.json:
 
-    python3 tool/species_pack/naming.py --write-vectors \
-        tool/species_pack/testdata/naming_vectors.json
+    python3 naming.py --write-vectors \
+        testdata/naming_vectors.json
 
 and test/features/species_id/domain/species_namer_vectors_test.dart checks
 the Dart namer against the same file. Arithmetic follows the Dart code step

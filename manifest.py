@@ -72,7 +72,7 @@ NAMING_PROVISIONAL = {
 # candidates, their text embeddings, and where each has been recorded.
 CONTENT_FILES = ("candidates.json", "text_embeddings.f16", "regions.bin")
 
-# Measured bars (tool/species_pack/score.py), one entry per measured
+# Measured bars (score.py), one entry per measured
 # detector set. They hold only for the exact pack they were measured on: the
 # same detectors in the same order, classifier and crop fitting, and the
 # same naming files byte for byte. Any other pack, a rebuilt candidate list

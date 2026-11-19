@@ -2,12 +2,13 @@
 # Builds the accuracy scorer's command-line tool from the app's own
 # VisionPipeline.swift, so the scorer measures exactly what ships.
 #
-#   tool/species_pack/vision_cli/build.sh build/species_accuracy_work/species_vision
+#   vision_cli/build.sh build/species_accuracy_work/species_vision
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
-repo=$(cd "$here/../../.." && pwd)
+# The app's checkout: SUBMERSION_APP, or a clone beside this repository.
+app=$(cd "${SUBMERSION_APP:-$here/../../submersion}" && pwd)
 out=${1:?usage: build.sh OUT}
-sources="$here/main.swift $here/FlutterShim.swift $repo/packages/submersion_vision/darwin/Classes/VisionPipeline.swift"
+sources="$here/main.swift $here/FlutterShim.swift $app/packages/submersion_vision/darwin/Classes/VisionPipeline.swift"
 # Nothing to do when the tool is newer than every source it is built from.
 if [ -x "$out" ]; then
   stale=0

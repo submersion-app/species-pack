@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Builds a marine life model pack for the app (issue #4668).
 
-    python3.14 -m venv .venv && .venv/bin/pip install -r tool/species_pack/requirements.txt
-    .venv/bin/python tool/species_pack/build_pack.py --out build/species_pack [--detectors cfd|megalodon|both]
+    python3.14 -m venv .venv && .venv/bin/pip install -r requirements.txt
+    .venv/bin/python build_pack.py --out build/species_pack [--detectors cfd|megalodon|both]
 
 Writes `manifest.json` and the files the Core ML engine needs: one model
 per detector (the Community Fish Detector, FathomNet's Megalodon, or both,
@@ -21,12 +21,13 @@ from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import app_repo  # noqa: E402
+
 import candidates as cand  # noqa: E402
 import manifest as mf  # noqa: E402
 import megalodon  # noqa: E402
 import region_grid  # noqa: E402
 
-REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 CLASSIFIER_CREDIT = {
     "name": "BioCLIP 2",
@@ -87,7 +88,7 @@ def default_version(now=None):
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", required=True)
-    parser.add_argument("--work", default=os.path.join(REPO, "build", "species_pack_work"))
+    parser.add_argument("--work", default=os.path.join(app_repo.BUILD, "species_pack_work"))
     parser.add_argument("--detectors", choices=sorted(mf.DETECTOR_SETS), default="cfd")
     parser.add_argument(
         "--megalodon-work",
@@ -145,9 +146,9 @@ def main(argv=None):
     models.zip_model(classifier_pkg, classifier_zip)
 
     # 3: candidates.
-    with open(os.path.join(REPO, "assets", "data", "species.json"), encoding="utf-8") as fh:
+    with open(app_repo.app_path("assets", "data", "species.json"), encoding="utf-8") as fh:
         catalogue = json.load(fh)["species"]
-    with open(os.path.join(REPO, "assets", "data", "species_gbif_keys.json"), encoding="utf-8") as fh:
+    with open(app_repo.app_path("assets", "data", "species_gbif_keys.json"), encoding="utf-8") as fh:
         keys = json.load(fh)
     rows = cand.catalogue_candidates(catalogue, keys["speciesKeys"])
     have = {r["gbifKey"] for r in rows}

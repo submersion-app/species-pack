@@ -2,7 +2,7 @@
 """Fetches and embeds the naming layer's training photos (issue #4724;
 docs/design/specs/2026-11-18-marine-life-naming-layer-design.md).
 
-    python -I tool/species_pack/fetch_training.py --pack PACK STAGE
+    python -I fetch_training.py --pack PACK STAGE
 
 Stages, each resumable:
 
@@ -42,12 +42,13 @@ import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import app_repo  # noqa: E402
+
 import fetch_testset as ft  # noqa: E402
 import testset  # noqa: E402
 import training_set as ts  # noqa: E402
 
-REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-DEFAULT_WORK = os.path.join(REPO, "build", "naming_training")
+DEFAULT_WORK = os.path.join(app_repo.BUILD, "naming_training")
 # iNaturalist asks API users for under 10,000 requests a day.
 DAILY_REQUESTS = 9500
 # Its guidance for media from its own servers is under 24 GB a day. Photos

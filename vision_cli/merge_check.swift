@@ -1,5 +1,5 @@
 // Checks the pipeline's merge of two detectors' boxes against the cases of
-// tool/species_pack/boxes_test.py, whose merge the accuracy scorer measured.
+// boxes_test.py, whose merge the accuracy scorer measured.
 // Built and run by check_merge.sh; exits 1 on any failure.
 import Foundation
 

@@ -2,7 +2,7 @@
 """Trains the naming layer's rows and derives a pack that carries them
 (issue #4724; docs/design/specs/2026-11-18-marine-life-naming-layer-design.md).
 
-    python -I tool/species_pack/train_naming.py --base PACK --training WORK --out PACK2
+    python -I train_naming.py --base PACK --training WORK --out PACK2
 
 One row per candidate, starting at its name row: the app scores a crop as
 its unit embedding times each row, times logitScale (100), and never
@@ -52,7 +52,7 @@ PATIENCE = 3
 LEARNING_RATE = 1e-3
 BATCH = 4096
 SEED = 0
-LIST_URL = "https://github.com/submersion-app/submersion/releases/download/species-pack/training_photos.csv"
+LIST_URL = "https://github.com/submersion-app/species-pack/releases/latest/download/training_photos.csv"
 
 
 def _unit(x):

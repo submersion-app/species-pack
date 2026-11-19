@@ -6,9 +6,9 @@ docs/design/specs/2026-11-17-marine-life-identification-measured-accuracy-design
 and the two detectors design,
 docs/design/specs/2026-11-17-marine-life-two-detectors-design.md).
 
-    python -I tool/species_pack/score.py --pack PACK
+    python -I score.py --pack PACK
 
-Runs the app's own vision pipeline (tool/species_pack/vision_cli) over every
+Runs the app's own vision pipeline (vision_cli) over every
 photo, the pair through the pipeline's own merge, which must equal
 boxes.py's on every photo; names each crop with naming.py, chooses bars
 with bars.py on the tune half of the natural sample, gates them on the
@@ -31,6 +31,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import app_repo  # noqa: E402
+
 import bars as bar_search  # noqa: E402
 import boxes as box_math  # noqa: E402
 import levels as level_search  # noqa: E402
@@ -42,8 +44,7 @@ import region_grid  # noqa: E402
 import report  # noqa: E402
 import testset  # noqa: E402
 
-REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-DEFAULT_WORK = os.path.join(REPO, "build", "species_accuracy_work")
+DEFAULT_WORK = os.path.join(app_repo.BUILD, "species_accuracy_work")
 FITS = ("padSquare", "centreCrop")
 MEGALODON = "megalodon-2024"
 BOTH = "both"
@@ -143,7 +144,7 @@ class Runner:
         here = os.path.dirname(os.path.abspath(__file__))
         for source in (
             os.path.join(here, "megalodon.py"),
-            os.path.join(REPO, "packages", "submersion_vision", "darwin", "Classes", "VisionPipeline.swift"),
+            app_repo.app_path(*app_repo.VISION_PIPELINE),
             os.path.join(here, "vision_cli", "main.swift"),
             os.path.join(here, "vision_cli", "FlutterShim.swift"),
         ):

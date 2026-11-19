@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
-"""Builds the accuracy test set: tool/species_pack/testdata/accuracy_set.csv,
+"""Builds the accuracy test set: testdata/accuracy_set.csv,
 and the photos it lists in a work folder kept out of git.
 
 To rebuild the test set exactly as it was measured, fetch the photos the
 committed CSV lists:
 
-    python -I tool/species_pack/fetch_testset.py photos-from-csv
+    python -I fetch_testset.py photos-from-csv
 
 To draw a new one, run the stages in order; each caches its results in
 --work and resumes:
 
-    python -I tool/species_pack/fetch_testset.py pool
-    python -I tool/species_pack/fetch_testset.py labels
-    python -I tool/species_pack/fetch_testset.py photos
-    python -I tool/species_pack/fetch_testset.py underwater
-    python -I tool/species_pack/fetch_testset.py commons
-    python -I tool/species_pack/fetch_testset.py junk-sheets --pack PACK
-    python -I tool/species_pack/fetch_testset.py review-sheets
+    python -I fetch_testset.py pool
+    python -I fetch_testset.py labels
+    python -I fetch_testset.py photos
+    python -I fetch_testset.py underwater
+    python -I fetch_testset.py commons
+    python -I fetch_testset.py junk-sheets --pack PACK
+    python -I fetch_testset.py review-sheets
     (mark out-of-water photos in WORK/underwater_overrides.json, and label
     the junk boxes in WORK/junk_labels.json, both by eye)
-    python -I tool/species_pack/fetch_testset.py write --force
+    python -I fetch_testset.py write --force
 
 `underwater` needs requirements.txt; the rest needs only Pillow. The rules
 themselves live in testset.py, which is tested in CI. Developer-run only.
@@ -39,11 +39,12 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import app_repo  # noqa: E402
+
 import region_grid  # noqa: E402
 import testset  # noqa: E402
 
-REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-DEFAULT_WORK = os.path.join(REPO, "build", "species_accuracy_work")
+DEFAULT_WORK = os.path.join(app_repo.BUILD, "species_accuracy_work")
 DEFAULT_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testdata", "accuracy_set.csv")
 USER_AGENT = "species-pack-accuracy/0.1 (+https://github.com/submersion-app/submersion)"
 INAT = "https://api.inaturalist.org/v2/observations"

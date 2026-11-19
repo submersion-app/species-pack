@@ -3,8 +3,8 @@
 accuracy scorer (the measured accuracy design,
 docs/design/specs/2026-11-17-marine-life-identification-measured-accuracy-design.md).
 
-    python -I tool/species_pack/megalodon.py convert megalodon-2024 --check-image PHOTO
-    python -I tool/species_pack/megalodon.py check megalodon-2024 --tool TOOL PHOTO...
+    python -I megalodon.py convert megalodon-2024 --check-image PHOTO
+    python -I megalodon.py check megalodon-2024 --tool TOOL PHOTO...
 
 Fetches the pinned checkpoints, opens them with torch's safe loader and an
 allowlist of the layer classes they hold, and converts them to 16-bit Core
@@ -27,11 +27,12 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import app_repo  # noqa: E402
+
 import boxes as box_math  # noqa: E402
 import manifest as pack_manifest  # noqa: E402
 
-REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-DEFAULT_WORK = os.path.join(REPO, "build", "species_accuracy_work")
+DEFAULT_WORK = os.path.join(app_repo.BUILD, "species_accuracy_work")
 
 CHECKPOINTS = {
     "megalodon-2024": {
@@ -200,7 +201,7 @@ def converted_dir(work, name):
     if not any(os.path.exists(os.path.join(folder, f"detector.{ext}")) for ext in ("mlpackage", "mlmodelc")):
         raise SystemExit(
             f"{name} is not converted in {work}; run "
-            f"`python -I tool/species_pack/megalodon.py convert {name} --work {work} --check-image PHOTO` first"
+            f"`python -I megalodon.py convert {name} --work {work} --check-image PHOTO` first"
         )
     return folder
 

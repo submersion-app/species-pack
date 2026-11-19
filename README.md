@@ -27,6 +27,31 @@ older one latest.
 
 Each release's notes list its parts' credits and licences.
 
+## Running the pipeline
+
+The pipeline builds the app's own `VisionPipeline.swift` into its vision
+tool, so the scorer measures exactly what ships, and it reads the app's
+species list. It needs a checkout of
+[the app](https://github.com/submersion-app/submersion): a clone called
+`submersion` beside this repository, or any checkout named with
+`SUBMERSION_APP`. Work folders go in `build/`.
+
+```bash
+python3.14 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+SUBMERSION_APP=../submersion .venv/bin/python -I score.py --pack PACK
+```
+
+The tests run with the standard library and numpy; the ones that need
+torch skip without it:
+
+```bash
+for test in *_test.py; do SUBMERSION_APP=../submersion python3.14 -I "$test"; done
+```
+
+The developer guide is in the app repository, at
+`docs/developer/species-identification.md`.
+
 ## Licence
 
 The code is under the GNU General Public License v3.0, as the app is. See

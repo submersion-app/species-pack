@@ -2,7 +2,7 @@
 """Unit tests for train_naming.py (issue #4724). Needs numpy; the training
 tests also need torch and are skipped without it.
 
-    .venv-species-pack/bin/python -I tool/species_pack/train_naming_test.py
+    .venv-species-pack/bin/python -I train_naming_test.py
 """
 
 import importlib.util
