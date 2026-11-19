@@ -42,12 +42,15 @@ jobs:
             assets/data
             docs/design/findings
             packages/submersion_vision/darwin
+            tool/species_pack/testdata
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
-      - name: Install numpy
-        # The tests that need torch skip without it.
-        run: python3.14 -m pip install numpy==2.5.5
+      - name: Install numpy and torch
+        # torch from its CPU-only index, for the training tests.
+        run: |
+          python3.14 -m pip install numpy==2.5.5
+          python3.14 -m pip install torch==2.15.0 --index-url https://download.pytorch.org/whl/cpu
       - name: Run the tests
         working-directory: species-pack
         run: |

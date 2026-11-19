@@ -41,6 +41,17 @@ def toy():
     return name_rows, x, y
 
 
+class ListUrlTest(unittest.TestCase):
+    def test_the_credit_names_the_pack_s_own_release(self):
+        self.assertEqual(
+            train_naming.list_url_for(train_naming.LIST_URL, "2026.11.20.0400"),
+            "https://github.com/submersion-app/species-pack/releases/download/2026.11.20.0400/training_photos.csv",
+        )
+
+    def test_a_url_without_a_version_is_kept(self):
+        self.assertEqual(train_naming.list_url_for("https://example.test/list.csv", "1"), "https://example.test/list.csv")
+
+
 class F16Test(unittest.TestCase):
     def test_f16_refuses_nan_and_overflow(self):
         with self.assertRaises(ValueError):

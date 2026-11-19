@@ -46,7 +46,7 @@ import testset  # noqa: E402
 
 DEFAULT_WORK = os.path.join(app_repo.BUILD, "species_accuracy_work")
 DEFAULT_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testdata", "accuracy_set.csv")
-USER_AGENT = "species-pack-accuracy/0.1 (+https://github.com/submersion-app/submersion)"
+USER_AGENT = "species-pack-accuracy/0.1 (+https://github.com/submersion-app/species-pack)"
 INAT = "https://api.inaturalist.org/v2/observations"
 GBIF = "https://api.gbif.org/v1"
 COMMONS = "https://commons.wikimedia.org/w/api.php"

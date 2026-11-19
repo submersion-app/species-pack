@@ -19,7 +19,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-USER_AGENT = "species-pack-builder/0.1 (+https://github.com/submersion-app/submersion)"
+USER_AGENT = "species-pack-builder/0.1 (+https://github.com/submersion-app/species-pack)"
 API = "https://api.gbif.org/v1"
 
 # Mirrors lib/features/marine_life/domain/services/species_category_mapper.dart,

@@ -62,4 +62,5 @@ listed in that release's notes.
 
 The pipeline moved here from `tool/species_pack/` in the app repository, with
 its history (submersion-app/submersion#4769). Pull request numbers in older
-commit messages refer to the app repository.
+commit messages refer to the app repository, and so do paths under `docs/`
+in comments and docstrings.

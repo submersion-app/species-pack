@@ -24,7 +24,7 @@ CLASSIFIER_WEIGHTS_SHA256 = "b7b2bf6fbc95799e42630e394cf95803892ab447c1a8ab629db
 CLASSIFIER_ID = "bioclip-2-vitl14-2957b32"
 EMBEDDING_SIZE = 768
 
-USER_AGENT = "species-pack-builder/0.1 (+https://github.com/submersion-app/submersion)"
+USER_AGENT = "species-pack-builder/0.1 (+https://github.com/submersion-app/species-pack)"
 
 
 def _sha256(path):
