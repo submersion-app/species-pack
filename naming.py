@@ -9,9 +9,10 @@ The two must not drift. This module writes testdata/naming_vectors.json:
         testdata/naming_vectors.json
 
 and the app's test/features/species_id/domain/species_namer_vectors_test.dart
-checks the Dart namer against its copy in the app's tool/species_pack/testdata/,
-which contract_test.py checks is the same file. Arithmetic follows the Dart code step
-for step (same order of sums), so the two agree to rounding.
+checks the Dart namer against its copy in the app's
+test/features/species_id/domain/fixtures/, which contract_test.py checks is
+the same file. Arithmetic follows the Dart code step for step (same order
+of sums), so the two agree to rounding.
 
 Standard library only, so its test runs in CI without the model tooling.
 """

@@ -3,10 +3,10 @@
 
 naming.py and region_grid.py write testdata/naming_vectors.json and
 testdata/region_vectors.json, and the app's Dart tests read their copies in
-the app's tool/species_pack/testdata/. The Python and the Dart are only
-checked against each other while the two copies are the same file, so this
-fails until a regenerated file is copied to the app too. Needs the app's
-checkout (app_repo.py).
+its test/features/species_id/domain/fixtures/. The Python and the Dart are
+only checked against each other while the two copies are the same file, so
+this fails until a regenerated file is copied to the app too. Needs the
+app's checkout (app_repo.py).
 """
 
 import os
@@ -19,7 +19,7 @@ sys.path.insert(0, _HERE)
 import app_repo  # noqa: E402
 
 SHARED = ("naming_vectors.json", "region_vectors.json")
-APP_TESTDATA = ("tool", "species_pack", "testdata")
+APP_TESTDATA = ("test", "features", "species_id", "domain", "fixtures")
 
 
 class SharedVectorsTest(unittest.TestCase):
