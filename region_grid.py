@@ -4,7 +4,7 @@
 The app reads the same grid in
 lib/features/species_id/domain/services/region_grid.dart. Both are checked
 against testdata/region_vectors.json, which this module writes (the app's
-tests read its copy in the app's tool/species_pack/testdata/, which
+tests read its copy in test/features/species_id/domain/fixtures/, which
 contract_test.py checks is the same file):
 
     python3 region_grid.py --write-vectors \

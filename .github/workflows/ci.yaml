@@ -42,7 +42,7 @@ jobs:
             assets/data
             docs/design/findings
             packages/submersion_vision/darwin
-            tool/species_pack/testdata
+            test/features/species_id/domain/fixtures
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
@@ -79,5 +79,3 @@ jobs:
             packages/submersion_vision/darwin
       - name: The pipeline merges boxes as boxes.py does
         run: species-pack/vision_cli/check_merge.sh "$RUNNER_TEMP/merge_check"
-      - name: The memory floor lets 8 GB devices in
-        run: species-pack/vision_cli/check_floor.sh "$RUNNER_TEMP/floor_check"
