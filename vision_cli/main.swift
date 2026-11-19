@@ -1,5 +1,5 @@
 // Runs the app's own vision pipeline (packages/submersion_vision) over a
-// list of images, for the accuracy scorer (tool/species_pack/score.py).
+// list of images, for the accuracy scorer (score.py).
 //
 //   species_vision --manifest M --detector D [--detector D2] --classifier C
 //                  --crop-fit F [--detector-boxes] < paths

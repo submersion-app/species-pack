@@ -1,0 +1,83 @@
+name: CI
+
+# The pipeline reads parts of the app (its species list, its findings and
+# its own VisionPipeline.swift), so every job checks out the app's main
+# branch beside this repository and names it with SUBMERSION_APP. The weekly
+# run catches a change on the app's side that this pipeline no longer
+# agrees with.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SUBMERSION_APP: ${{ github.workspace }}/submersion
+
+jobs:
+  tests:
+    name: Pipeline tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: species-pack
+      - uses: actions/checkout@v7
+        with:
+          repository: submersion-app/submersion
+          path: submersion
+          sparse-checkout: |
+            assets/data
+            docs/design/findings
+            packages/submersion_vision/darwin
+            tool/species_pack/testdata
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Install numpy and torch
+        # torch from its CPU-only index, for the training tests.
+        run: |
+          python3.14 -m pip install numpy==2.5.5
+          python3.14 -m pip install torch==2.15.0 --index-url https://download.pytorch.org/whl/cpu
+      - name: Run the tests
+        working-directory: species-pack
+        run: |
+          for test in *_test.py; do
+            echo "== $test"
+            python3.14 -I "$test"
+          done
+      - name: No em-dash or en-dash as punctuation
+        working-directory: species-pack
+        run: python3.14 -I no_dashes.py
+
+  vision:
+    name: Vision pipeline checks
+    # Core ML: the merge check builds the app's VisionPipeline.swift.
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: species-pack
+      - uses: actions/checkout@v7
+        with:
+          repository: submersion-app/submersion
+          path: submersion
+          sparse-checkout: |
+            packages/submersion_vision/darwin
+      - name: The pipeline merges boxes as boxes.py does
+        run: species-pack/vision_cli/check_merge.sh "$RUNNER_TEMP/merge_check"
+      - name: The memory floor lets 8 GB devices in
+        run: species-pack/vision_cli/check_floor.sh "$RUNNER_TEMP/floor_check"

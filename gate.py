@@ -2,7 +2,7 @@
 """The naming layer's ship gate (issue #4724;
 docs/design/specs/2026-11-18-marine-life-naming-layer-design.md, "The gate").
 
-    python -I tool/species_pack/gate.py --baseline W0 --baseline-pack P0 \
+    python -I gate.py --baseline W0 --baseline-pack P0 \
         --trained W1 --trained-pack P1 --check W2 --check-pack P2
 
 W0, W1 and W2 are score.py work folders: the baseline pack P0, the trained

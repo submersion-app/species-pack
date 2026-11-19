@@ -3,10 +3,12 @@
 
 The app reads the same grid in
 lib/features/species_id/domain/services/region_grid.dart. Both are checked
-against testdata/region_vectors.json, which this module writes:
+against testdata/region_vectors.json, which this module writes (the app's
+tests read its copy in the app's tool/species_pack/testdata/, which
+contract_test.py checks is the same file):
 
-    python3 tool/species_pack/region_grid.py --write-vectors \
-        tool/species_pack/testdata/region_vectors.json
+    python3 region_grid.py --write-vectors \
+        testdata/region_vectors.json
 
 Cells are numbered row by row from latitude -90 and longitude -180.
 Latitude 90 falls in the last row. Longitude 180 is longitude -180.

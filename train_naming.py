@@ -2,7 +2,7 @@
 """Trains the naming layer's rows and derives a pack that carries them
 (issue #4724; docs/design/specs/2026-11-18-marine-life-naming-layer-design.md).
 
-    python -I tool/species_pack/train_naming.py --base PACK --training WORK --out PACK2
+    python -I train_naming.py --base PACK --training WORK --out PACK2
 
 One row per candidate, starting at its name row: the app scores a crop as
 its unit embedding times each row, times logitScale (100), and never
@@ -52,7 +52,15 @@ PATIENCE = 3
 LEARNING_RATE = 1e-3
 BATCH = 4096
 SEED = 0
-LIST_URL = "https://github.com/submersion-app/submersion/releases/download/species-pack/training_photos.csv"
+# A trained pack's list of training photos and their authors goes in the
+# pack's own release, so each pack's credit keeps naming the photos it was
+# trained on after a newer pack is published.
+LIST_URL = "https://github.com/submersion-app/species-pack/releases/download/{version}/training_photos.csv"
+
+
+def list_url_for(template, version):
+    """`template` with `{version}` replaced by the pack's version."""
+    return template.replace("{version}", version)
 
 
 def _unit(x):
@@ -293,7 +301,9 @@ def main(argv=None):
         metavar="PACK",
         help="train with this trained pack's chosen settings instead of searching (the check layer)",
     )
-    parser.add_argument("--list-url", default=LIST_URL)
+    parser.add_argument(
+        "--list-url", default=LIST_URL, help="where the training photo list is published; {version} is the pack's"
+    )
     parser.add_argument(
         "--seed", type=int, help=f"the batch order's seed (default {SEED}; with --settings-from, that pack's)"
     )
@@ -324,7 +334,7 @@ def main(argv=None):
             "name rows validation top-1": top1(name_rows, xv, yv),
         }
     )
-    credit = mf.training_credit(len(records), args.list_url)
+    credit = mf.training_credit(len(records), list_url_for(args.list_url, args.version))
     derived = derive(args.base, args.out, rows, version=args.version, credit=credit)
     # The record names the rows it describes, so a stale record beside other
     # rows (a rerun into the same folder that stopped early) is caught.

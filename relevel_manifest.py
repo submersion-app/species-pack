@@ -6,7 +6,7 @@ the pack takes the new manifest in place without downloading (issue
 #4721). Only `naming.precision` and `naming.levels` may change; anything
 else needs a new pack version, and the tool refuses it.
 
-    python3.14 tool/species_pack/relevel_manifest.py --in published.json --out manifest.json
+    python3.14 relevel_manifest.py --in published.json --out manifest.json
 """
 
 import argparse

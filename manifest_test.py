@@ -20,6 +20,7 @@ def _load(name):
 
 
 manifest = _load("manifest")
+app_repo = _load("app_repo")
 models = _load("models")
 
 
@@ -196,7 +197,7 @@ class MeasuredBarsTests(unittest.TestCase):
 
     def test_the_measured_bars_name_their_findings(self):
         for entry in manifest.NAMING_MEASURED:
-            path = os.path.join(_HERE, "..", "..", entry["findings"])
+            path = app_repo.app_path(entry["findings"])
             self.assertTrue(os.path.exists(path), path)
 
     def test_each_measured_entry_has_sound_levels(self):

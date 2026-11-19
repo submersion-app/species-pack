@@ -12,7 +12,7 @@ import urllib.request
 
 from region_grid import cell_of
 
-USER_AGENT = "species-pack-builder/0.1 (+https://github.com/submersion-app/submersion)"
+USER_AGENT = "species-pack-builder/0.1 (+https://github.com/submersion-app/species-pack)"
 TILE = "https://api.gbif.org/v2/map/occurrence/density/0/{x}/0@1x.png?srs=EPSG:4326&taxonKey={key}&style=classic.point"
 TILE_SIZE = 512
 DEGREES_PER_PIXEL = 180 / TILE_SIZE
