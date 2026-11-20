@@ -72,15 +72,16 @@ NAMING_PROVISIONAL = {
 # candidates, their text embeddings, and where each has been recorded.
 CONTENT_FILES = ("candidates.json", "text_embeddings.f16", "regions.bin")
 
-# Measured bars (score.py), one entry per measured
-# detector set. They hold only for the exact pack they were measured on: the
+# Measured bars (score.py), one entry per measured detector set and set of
+# naming files. They hold only for the exact pack they were measured on: the
 # same detectors in the same order, classifier and crop fitting, and the
 # same naming files byte for byte. Any other pack, a rebuilt candidate list
 # of the same size included, gets the provisional bars until the scorer is
-# run on it. A bar of 1.01 is never: no confident names, since at each
-# set's chosen fitting no bar proved 95% right. Measured on the pack with
-# surveyed species (9,151 candidates); the earlier 7,646 pack's bars no
-# longer apply. Each set's `precision` (its own bars, held out) and naming
+# run on it. A bar of 1.01 is never: no confident names, since at that
+# set's chosen fitting no bar proved 95% right. The first three entries
+# name with BioCLIP 2's name rows, measured on the pack with surveyed
+# species (9,151 candidates); the earlier 7,646 pack's bars no longer
+# apply. Their `precision` (each set's own bars, held out) and naming
 # levels (issue #4721) were measured on pack 2026.11.18.0356 under these
 # bars. Every `precision` here, Surer's and each level's, is the lower of
 # the held-out precisions with a location and without one, so it can sit
@@ -91,6 +92,12 @@ _MEASURED_CONTENTS = {
     "regions.bin": "f07736bd1c38fb5321b1900ebf0ab51555a9cf0715af4f364292202d953e4bcd",
 }
 _FINDINGS = "docs/design/findings/2026-11-17-marine-life-measured-accuracy.md"
+# The trained naming rows (issue #4724), on the same candidates and regions.
+_TRAINED_CONTENTS = {
+    **_MEASURED_CONTENTS,
+    "text_embeddings.f16": "91f97b95c13886326f35a4bd976d06e7858aef05f7b6b03360135ed26bc13964",
+}
+_TRAINED_FINDINGS = "docs/design/findings/2026-11-20-marine-life-naming-layer.md"
 NAMING_MEASURED = [
     {
         "naming": {
@@ -203,6 +210,39 @@ NAMING_MEASURED = [
         "packVersion": "2026.11.18.0356",
         "contents": _MEASURED_CONTENTS,
         "findings": _FINDINGS,
+    },
+    # Both detectors with the trained naming rows (issue #4724), measured on
+    # pack 2026.11.20.0513 with its own precision and levels. Its confident
+    # bars are real ones: they proved 95% right and survived the held-out
+    # gate.
+    {
+        "naming": {
+            "provisional": False,
+            "minCropSide": 64,
+            "minOpenScore": 0.19,
+            "suggestScore": 0.47,
+            "confidentScore": 0.93,
+            "suggestScoreNoLocation": 0.46,
+            "confidentScoreNoLocation": 0.94,
+            "minAllowedCandidates": 200,
+            "topK": 5,
+            "precision": 0.865,
+            "levels": [
+                {
+                    "id": "balanced",
+                    "target": 0.75,
+                    "suggestScore": 0.33,
+                    "suggestScoreNoLocation": 0.39,
+                    "precision": 0.834,
+                },
+            ],
+        },
+        "detectorIds": [DETECTORS["cfd"]["id"], DETECTORS["megalodon"]["id"]],
+        "classifierId": "bioclip-2-vitl14-2957b32",
+        "cropFit": "centreCrop",
+        "packVersion": "2026.11.20.0513",
+        "contents": _TRAINED_CONTENTS,
+        "findings": _TRAINED_FINDINGS,
     },
 ]
 
