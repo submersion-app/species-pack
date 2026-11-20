@@ -178,6 +178,59 @@ def convert(name, work, check_image):
     ml.save(target)
 
     got = np.asarray(next(iter(ml.predict({"image": x}).values())), dtype=np.float32)
+    _check_converted(name, reference, got)
+    return target
+
+
+def convert_onnx(name, work, check_image):
+    """`<work>/models/<name>/onnx/model.onnx`, 16-bit weights, the same
+    export-mode model the Core ML conversion traces (one output, `[1, 4 +
+    classes, anchors]`), checked against the PyTorch model on
+    `check_image` as the Core ML one is."""
+    import numpy as np
+    import onnx
+    import torch
+    from PIL import Image
+
+    import onnx_models
+
+    model = load(name)
+    size = SETTINGS["inputSize"]
+    x, _ = letterbox(Image.open(check_image), size)
+    example = torch.from_numpy(x)
+    with torch.no_grad():
+        reference = model(example).numpy()
+    out_dir = os.path.join(work, "models", name, "onnx")
+    os.makedirs(out_dir, exist_ok=True)
+    raw = os.path.join(out_dir, "exported.onnx")
+    torch.onnx.export(
+        model, example, raw, input_names=["image"], output_names=["detections"], opset_version=17, dynamo=False
+    )
+    target = os.path.join(out_dir, onnx_models.MODEL_NAME)
+    onnx.save(onnx_models.weights_to_float16(onnx.load(raw)), target)
+    os.remove(raw)
+    (got,) = onnx_models.run(target, x)
+    _check_converted(name, reference, np.asarray(got, dtype=np.float32))
+    return target
+
+
+def onnx_model(work, name):
+    """The converted ONNX model in `work`, or a stop saying how to make it."""
+    path = os.path.join(work, "models", name, "onnx", "model.onnx")
+    if not os.path.exists(path):
+        raise SystemExit(
+            f"{name} has no ONNX model in {work}; run "
+            f"`python -I megalodon.py convert-onnx {name} --work {work} --check-image PHOTO` first"
+        )
+    return path
+
+
+def _check_converted(name, reference, got):
+    """Stops unless a converted Megalodon (`got`) matches the original's
+    output (`reference`) on the check image: the ten best scores and the
+    best box."""
+    import numpy as np
+
     ref_scores, got_scores = reference[0, 4:].max(0), got[0, 4:].max(0)
     if ref_scores.max() < 0.25:
         raise SystemExit(f"{name}: nothing found in the check image; choose one with an animal in it")
@@ -190,7 +243,6 @@ def convert(name, work, check_image):
     print(f"{name}: score drift {drift:.4f}, best box overlap {overlap:.3f}")
     if drift > 0.05 or overlap < 0.9:
         raise SystemExit(f"{name}: converted detector differs from the original")
-    return target
 
 
 def converted_dir(work, name):
@@ -311,7 +363,7 @@ def check(name, tool, manifest_path, classifier, photos, work):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("action", choices=["convert", "check"])
+    parser.add_argument("action", choices=["convert", "convert-onnx", "check"])
     parser.add_argument("name", choices=sorted(CHECKPOINTS))
     parser.add_argument("photos", nargs="*")
     parser.add_argument("--work", default=DEFAULT_WORK)
@@ -324,6 +376,11 @@ def main(argv=None):
         if not args.check_image:
             parser.error("convert needs --check-image")
         convert(args.name, args.work, args.check_image)
+        return 0
+    if args.action == "convert-onnx":
+        if not args.check_image:
+            parser.error("convert-onnx needs --check-image")
+        convert_onnx(args.name, args.work, args.check_image)
         return 0
     if not (args.tool and args.pack and args.classifier and args.photos):
         parser.error("check needs --tool, --pack, --classifier and photos")

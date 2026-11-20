@@ -242,11 +242,11 @@ def model_zip(stem, engine):
 
 
 def model_in(folder):
-    """The model a folder holds: a compiled model when there is one (the
-    vision tool compiles a package once and deletes it), else the package.
-    None when there is neither."""
+    """The model a folder holds: a compiled Core ML model when there is one
+    (the vision tool compiles a package once and deletes it), else the
+    package, else an ONNX model. None when there is none."""
     names = sorted(os.listdir(folder)) if os.path.isdir(folder) else []
-    for ext in (".mlmodelc", ".mlpackage"):
+    for ext in (".mlmodelc", ".mlpackage", ".onnx"):
         for name in names:
             if name.endswith(ext):
                 return os.path.join(folder, name)
@@ -264,7 +264,8 @@ def unpack_model(pack, stem, folder, engine="coreml"):
             zf.extractall(folder)
         path = model_in(folder)
         if path is None:
-            raise SystemExit(f"{name} in {pack} holds no Core ML model (.mlpackage or .mlmodelc at its top)")
+            kind = "an ONNX model (model.onnx" if engine == "onnx" else "a Core ML model (.mlpackage or .mlmodelc"
+            raise SystemExit(f"{name} in {pack} holds no {kind} at its top)")
     return path
 
 
