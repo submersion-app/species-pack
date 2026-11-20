@@ -452,13 +452,16 @@ def _photo(work, row):
     return os.path.join(work, "photos", f"{row['source']}_{row['id']}.jpg")
 
 
-def _junk_records(name, results_by_photo, junk_rows, namer, work, fish_cells):
+def _junk_records(name, results_by_photo, junk_rows, namer, work, fish_cells, strict=True):
     """Each junk row named from the detection it labels, found by its box
-    (an intersection over union of 0.9 or more). A single detector's run
-    must find every one of its rows among its own boxes, or the junk check
-    would pass on nothing. In a merged run a row may match a box from
-    either detector, since the other detector's box can have replaced its
-    own, and each merged box counts once however many rows match it."""
+    (an intersection over union of 0.9 or more), and the keys of the rows
+    no box matched. A single detector's Core ML run (`strict`) must find
+    every one of its rows among its own boxes, or the junk check would pass
+    on nothing. The rows were labelled on Core ML's boxes, so another
+    engine's run leaves the ones it moved out, and engine_gate.py bounds
+    how many. In a merged run a row may match a box from either detector,
+    since the other detector's box can have replaced its own, and each
+    merged box counts once however many rows match it."""
     records, missing, used = [], [], set()
     for row in sorted(junk_rows, key=lambda r: (r["id"], r["detector"], int(r["box"]))):
         if name != BOTH and row["detector"] != name:
@@ -481,13 +484,30 @@ def _junk_records(name, results_by_photo, junk_rows, namer, work, fish_cells):
         record = _crop_record(row, detection, namer, junk_cell=cell)
         if record:
             records.append(record)
-    if missing and name != BOTH:
+    if missing and name != BOTH and strict:
         raise SystemExit(f"{name}: {len(missing)} junk rows match no box in this run, for example {missing[:3]}")
-    return records
+    return records, missing
+
+
+def absolute_paths(args):
+    """Makes the pack and work folders absolute, in place: the ONNX runner
+    runs in the app's folder, so a relative path would name another one."""
+    args.pack = os.path.abspath(args.pack)
+    args.work = os.path.abspath(args.work)
 
 
 def evaluate(
-    name, results_by_photo, animals, junk_rows, namer, work, min_side, tune, fixed_bars=None, published=None
+    name,
+    results_by_photo,
+    animals,
+    junk_rows,
+    namer,
+    work,
+    min_side,
+    tune,
+    fixed_bars=None,
+    published=None,
+    strict_junk=True,
 ):
     """Every number for one detector (or merged pair) and fitting.
     `results_by_photo` maps a photo path to its detections, each tagged
@@ -510,7 +530,7 @@ def evaluate(
             if record:
                 crops[row["id"]] = record
 
-    junk = _junk_records(name, results_by_photo, junk_rows, namer, work, fish_cells)
+    junk, junk_unmatched = _junk_records(name, results_by_photo, junk_rows, namer, work, fish_cells, strict=strict_junk)
 
     def half(records, want_tune):
         return [c for c in records if (_key(c["row"]) in tune) == want_tune]
@@ -664,7 +684,7 @@ def evaluate(
         ),
         "junk named (held-out)": metrics.rate(sum(junk_named), len(junk_named)).__dict__,
         "fixed bars held out": fixed_held_out,
-        "junk crops": {"tune": len(tune_junk), "held-out": len(held_junk)},
+        "junk crops": {"tune": len(tune_junk), "held-out": len(held_junk), "rows no box matched": len(junk_unmatched)},
         "by group (held-out, natural and top-up)": metrics.breakdown(
             held_rows, lambda r: r["group"], lambda rows: {**recall(rows), **summary([crops[r["id"]] for r in rows if r["id"] in crops])}
         ),
@@ -807,6 +827,7 @@ def main(argv=None):
         help="name at this pack's bars instead of choosing them (the naming layer's rare-species check)",
     )
     args = parser.parse_args(argv)
+    absolute_paths(args)
     fixed_bars = None
     if args.naming_from:
         with open(os.path.join(args.naming_from, "manifest.json"), encoding="utf-8") as fh:
@@ -908,6 +929,7 @@ def main(argv=None):
                 tune,
                 fixed_bars=fixed_bars,
                 published=published,
+                strict_junk=args.engine == "coreml",
             )
             if (
                 fixed_bars is None

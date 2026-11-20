@@ -293,8 +293,20 @@ class EngineCheckTest(unittest.TestCase):
         self.assertFalse(self.check(right=280)["pass"])
 
     def test_core_ml_scores_are_refused_as_onnx_ones(self):
-        with self.assertRaisesRegex(SystemExit, "ONNX"):
+        with self.assertRaisesRegex(SystemExit, "not the onnx engine's"):
             self.check(onnx=self.scores(self.manifest(), engine="coreml"))
+
+    def test_an_onnx_run_given_as_the_core_ml_side_is_refused(self):
+        manifest = self.manifest()
+        onnx = self.scores(manifest, engine="onnx")
+        with self.assertRaisesRegex(SystemExit, "not the coreml engine's"):
+            gate.engine_check(manifest, onnx, onnx)
+
+    def test_the_naming_checks_take_core_ml_scores_only(self):
+        gate.confirm_engine({}, "coreml", "trained")
+        gate.confirm_engine({"engine": "coreml"}, "coreml", "trained")
+        with self.assertRaisesRegex(SystemExit, "trained scores are the onnx engine's"):
+            gate.confirm_engine({"engine": "onnx"}, "coreml", "trained")
 
     def test_onnx_scores_of_another_pack_are_refused(self):
         with self.assertRaisesRegex(SystemExit, "pack"):

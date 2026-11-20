@@ -118,6 +118,14 @@ def confirm_scored(results, manifest, label):
         raise SystemExit(f"the {label} scores were not made on the {label} pack's files")
 
 
+def confirm_engine(results, engine, label):
+    """Stops unless `results` were scored on `engine`. score.py records the
+    engine; scores from before it did are Core ML's."""
+    found = results.get("engine", "coreml")
+    if found != engine:
+        raise SystemExit(f"the {label} scores are the {found} engine's, not the {engine} engine's")
+
+
 def confirm_training_record(training, manifest, label):
     """Stops unless a pack's training.json describes that pack's rows: the
     rows hash it recorded is the one its manifest lists. This catches a
@@ -188,8 +196,8 @@ def engine_check(manifest, coreml, onnx):
             "the trained pack has ONNX models: score it on the ONNX engine at its own bars "
             "(score.py --engine onnx --naming-from PACK) and pass that run's folder as --trained-onnx"
         )
-    if onnx["results"].get("engine") != "onnx":
-        raise SystemExit(f"--trained-onnx holds the {onnx['results'].get('engine', 'coreml')} engine's scores, not ONNX's")
+    confirm_engine(coreml["results"], "coreml", "trained")
+    confirm_engine(onnx["results"], "onnx", "--trained-onnx")
     confirm_scored(onnx["results"], manifest, "trained ONNX")
     confirm_same_photos(coreml["per_photo"], onnx["per_photo"])
     onnx_eval = onnx["results"]["evaluations"][SET_KEY]
@@ -258,6 +266,9 @@ def main(argv=None):
     ):
         results[label] = _read(folder, "results.json")
         manifests[label] = _read(pack, "manifest.json")
+        # The naming checks are measured on Core ML; ONNX joins through
+        # engine_check alone.
+        confirm_engine(results[label], "coreml", label)
         confirm_scored(results[label], manifests[label], label)
     per_photo = {
         label: _read(folder, "per_photo.json")[SET_KEY]

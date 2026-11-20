@@ -35,6 +35,10 @@ import gate  # noqa: E402
 
 ALPHA = gate.ALPHA
 JUNK_LIMIT = gate.JUNK_LIMIT
+# The share of held-out junk crops only one engine's run found (its box
+# moved past the 0.9 overlap), left out of the junk pairing, above which the
+# junk check fails: the ones left out could hide junk named.
+UNPAIRED_JUNK_SHARE = 0.05
 
 
 def _paired(first, second, ids):
@@ -80,21 +84,49 @@ def no_group_worse(coreml, onnx):
 
 
 def junk(onnx_eval, coreml_junk, onnx_junk):
+    """The ONNX engine names junk no more than the limit, and not more often
+    than Core ML on the same held-out junk crops (paired). A junk crop is
+    paired when both runs found its labelled box; one only one run found is
+    left out of the pairing, and the check fails when more than
+    UNPAIRED_JUNK_SHARE of the crops are, or none are paired, since the
+    left-out ones could hide junk named."""
     rate = onnx_eval["junk named (tune, at the chosen bars)"]
     keys = sorted(set(coreml_junk) & set(onnx_junk))
+    unpaired = len(set(coreml_junk) ^ set(onnx_junk))
+    every = len(set(coreml_junk) | set(onnx_junk))
     only_onnx = sum(1 for k in keys if onnx_junk[k] and not coreml_junk[k])
     only_coreml = sum(1 for k in keys if coreml_junk[k] and not onnx_junk[k])
     p = bar_search.mcnemar_p(only_onnx, only_coreml)
     more = p < ALPHA and only_onnx > only_coreml
+    paired_enough = bool(keys) and unpaired <= UNPAIRED_JUNK_SHARE * every
     return {
-        "pass": rate <= JUNK_LIMIT and not more,
+        "pass": rate <= JUNK_LIMIT and not more and paired_enough,
         "junk named": rate,
         "limit": JUNK_LIMIT,
         "held-out crops": len(keys),
+        "only in one run": unpaired,
         "only onnx": only_onnx,
         "only core ml": only_coreml,
         "p": p,
     }
+
+
+def confirm_pack_bars(manifest, coreml_eval, onnx_eval):
+    """Stops unless both runs named at the pack's own bars: the ONNX run
+    fixed at them (score.py --naming-from PACK), the Core ML run the one
+    that measured them or fixed at them too. The pairings are fair only at
+    one set of bars."""
+    published = bar_search.published_bars(manifest["naming"])
+    if published is None:
+        raise SystemExit("the pack's bars are provisional: measure them on Core ML first, then score ONNX at them")
+    want = published.__dict__
+    for label, evaluation in (("Core ML", coreml_eval), ("ONNX", onnx_eval)):
+        named_at = evaluation["bars after held-out gate"]
+        if any(abs(named_at[k] - want[k]) > 1e-9 for k in want):
+            raise SystemExit(
+                f"the {label} run was named at bars {named_at}, not the pack's {want}; "
+                "score it with --naming-from PACK"
+            )
 
 
 def check(coreml_per_photo, onnx_per_photo, onnx_eval, coreml_junk, onnx_junk):
@@ -125,12 +157,14 @@ def main(argv=None):
     results, per_photo, per_junk = {}, {}, {}
     for engine, folder in folders.items():
         results[engine] = _read(folder, "results.json")
-        if results[engine].get("engine", "coreml") != engine:
-            raise SystemExit(f"{folder}/results.json is the {results[engine].get('engine')} engine's, not {engine}'s")
+        gate.confirm_engine(results[engine], engine, folder)
         gate.confirm_scored(results[engine], manifest, engine)
         per_photo[engine] = _read(folder, "per_photo.json")[args.set_key]
         per_junk[engine] = _read(folder, "per_junk.json")[args.set_key]
     gate.confirm_same_photos(per_photo["coreml"], per_photo["onnx"])
+    confirm_pack_bars(
+        manifest, results["coreml"]["evaluations"][args.set_key], results["onnx"]["evaluations"][args.set_key]
+    )
     result = check(
         per_photo["coreml"],
         per_photo["onnx"],

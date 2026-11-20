@@ -3,6 +3,7 @@
 NAMING_MEASURED copies into manifest.py, from levels measured by
 levels.py."""
 
+import argparse
 import os
 import sys
 import unittest
@@ -103,6 +104,26 @@ class EngineTests(unittest.TestCase):
         self.assertRegex(ort_library.NUPKG_SHA256, r"^[0-9a-f]{64}$")
         self.assertRegex(ort_library.DYLIB_SHA256, r"^[0-9a-f]{64}$")
         self.assertTrue(ort_library.NUPKG_URL.startswith("https://api.nuget.org/"))
+
+class JunkMatchTests(unittest.TestCase):
+    ROW = {"source": "commons", "id": "7", "detector": "cfd", "box": "0", "box_x": "0.1", "box_y": "0.1", "box_w": "0.2", "box_h": "0.2"}
+
+    def test_a_core_ml_detector_run_must_find_every_junk_row(self):
+        with self.assertRaisesRegex(SystemExit, "1 junk rows match no box"):
+            score._junk_records("cfd", {}, [self.ROW], None, "/w", [0])
+
+    def test_an_onnx_detector_run_leaves_unmatched_junk_rows_out(self):
+        records, missing = score._junk_records("cfd", {}, [self.ROW], None, "/w", [0], strict=False)
+        self.assertEqual((records, missing), ([], ["cfd:7:0"]))
+
+
+class PathTests(unittest.TestCase):
+    def test_the_pack_and_work_folders_are_made_absolute(self):
+        args = argparse.Namespace(pack="pack", work=os.path.join("w", "x"), naming_from=None)
+        score.absolute_paths(args)
+        self.assertEqual(args.pack, os.path.abspath("pack"))
+        self.assertEqual(args.work, os.path.abspath(os.path.join("w", "x")))
+        self.assertIsNone(args.naming_from)
 
 
 if __name__ == "__main__":

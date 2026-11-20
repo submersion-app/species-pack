@@ -86,6 +86,59 @@ class GateTests(unittest.TestCase):
         del onnx["fish0"]
         self.assertEqual(self.check(coreml=coreml, onnx=onnx)["not fewer named right"]["photos"], 399)
 
+    def test_junk_with_no_crops_in_common_fails(self):
+        result = self.check(coreml_junk={"cfd:a:0": False}, onnx_junk={"cfd:b:0": False})
+        self.assertFalse(result["junk"]["pass"])
+        self.assertEqual(result["junk"]["held-out crops"], 0)
+
+    def test_a_few_crops_only_one_engine_found_are_left_out(self):
+        onnx = junk([False] * 50)
+        for key in ("cfd:0:0", "cfd:1:0"):
+            del onnx[key]
+        result = self.check(onnx_junk=onnx)["junk"]
+        self.assertTrue(result["pass"], result)
+        self.assertEqual((result["held-out crops"], result["only in one run"]), (48, 2))
+
+    def test_many_crops_only_one_engine_found_fail(self):
+        onnx = junk([False] * 50)
+        for i in range(5):
+            del onnx[f"cfd:{i}:0"]
+        self.assertFalse(self.check(onnx_junk=onnx)["junk"]["pass"])
+
+
+class PackBarsTests(unittest.TestCase):
+    NAMING = {
+        "provisional": False,
+        "minOpenScore": 0.1,
+        "suggestScore": 0.7,
+        "suggestScoreNoLocation": 0.8,
+        "confidentScore": 0.93,
+        "confidentScoreNoLocation": 1.01,
+    }
+    BARS = {"min_open": 0.1, "suggest": 0.7, "suggest_no_location": 0.8, "confident": 0.93, "confident_no_location": 1.01}
+
+    def confirm(self, naming=None, coreml=None, onnx=None):
+        engine_gate.confirm_pack_bars(
+            {"naming": naming or self.NAMING},
+            {"bars after held-out gate": coreml or self.BARS},
+            {"bars after held-out gate": onnx or self.BARS},
+        )
+
+    def test_runs_named_at_the_pack_s_bars_pass(self):
+        self.confirm()
+
+    def test_an_onnx_run_at_another_pack_s_bars_is_refused(self):
+        with self.assertRaisesRegex(SystemExit, "ONNX run"):
+            self.confirm(onnx={**self.BARS, "suggest": 0.6})
+
+    def test_a_core_ml_run_at_bars_it_found_again_is_refused(self):
+        with self.assertRaisesRegex(SystemExit, "Core ML run.*--naming-from"):
+            self.confirm(coreml={**self.BARS, "confident": 0.95})
+
+    def test_a_pack_with_provisional_bars_is_refused(self):
+        with self.assertRaisesRegex(SystemExit, "provisional"):
+            self.confirm(naming={"provisional": True})
+
 
 if __name__ == "__main__":
     unittest.main()

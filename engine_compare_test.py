@@ -3,8 +3,10 @@
 the same photos, crop by crop. Needs numpy."""
 
 import importlib.util
+import json
 import os
 import sys
+import tempfile
 import unittest
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -70,6 +72,56 @@ class CompareTests(unittest.TestCase):
         other["p0"] = line("p0", [[1.0, 0.0], [0.0, 1.0]])
         result = compare(reference, other)
         self.assertEqual(result["unmatched"], 1)
+
+    def test_a_partial_run_fails(self):
+        reference = {f"p{i}": line(f"p{i}", [[1.0, 0.1]]) for i in range(100)}
+        result = compare(reference, {"p0": reference["p0"]})
+        self.assertFalse(result["pass"])
+        self.assertEqual(result["photos in one run only"], 99)
+
+    def test_an_error_line_fails(self):
+        reference = {f"p{i}": line(f"p{i}", [[1.0, 0.1]]) for i in range(100)}
+        other = {**reference, "p0": {"path": "p0", "error": "unreadable"}}
+        result = compare(reference, other)
+        self.assertFalse(result["pass"])
+        self.assertEqual(result["error lines"], 1)
+
+    def test_a_zero_embedding_is_under_the_cosine_floor(self):
+        reference = {f"p{i}": line(f"p{i}", [[1.0, 0.0]]) for i in range(100)}
+        other = {**reference, "p0": line("p0", [[0.0, 0.0]])}
+        result = compare(reference, other)
+        self.assertFalse(result["pass"])
+        self.assertEqual(result["below cosine floor"], 1)
+
+
+class ReadTests(unittest.TestCase):
+    def write(self, folder, rows):
+        path = os.path.join(folder, "run.jsonl")
+        with open(path, "w", encoding="utf-8") as fh:
+            for row in rows:
+                fh.write(json.dumps(row) + "\n")
+        return path
+
+    def test_photos_are_matched_by_name_across_machines(self):
+        with tempfile.TemporaryDirectory() as d:
+            mac = engine_compare.read_run(self.write(d, [line("/Users/a/work/photos/inaturalist_1.jpg", [[1.0, 0.0]])]))
+        with tempfile.TemporaryDirectory() as d:
+            pc = engine_compare.read_run(
+                self.write(d, [line("C:\\work\\photos\\inaturalist_1.jpg", [[1.0, 0.0]])])
+            )
+        self.assertEqual(set(mac), {"inaturalist_1.jpg"})
+        self.assertEqual(set(pc), {"inaturalist_1.jpg"})
+
+    def test_two_photos_of_one_name_are_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = self.write(d, [line("/a/x.jpg", [[1.0, 0.0]]), line("/b/x.jpg", [[1.0, 0.0]])])
+            with self.assertRaisesRegex(SystemExit, "x.jpg"):
+                engine_compare.read_run(path)
+
+    def test_error_lines_are_kept(self):
+        with tempfile.TemporaryDirectory() as d:
+            run = engine_compare.read_run(self.write(d, [{"path": "/a/x.jpg", "error": "unreadable"}]))
+        self.assertEqual(run["x.jpg"]["error"], "unreadable")
 
 
 if __name__ == "__main__":
