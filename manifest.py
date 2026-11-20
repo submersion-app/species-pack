@@ -91,6 +91,13 @@ _MEASURED_CONTENTS = {
     "regions.bin": "f07736bd1c38fb5321b1900ebf0ab51555a9cf0715af4f364292202d953e4bcd",
 }
 _FINDINGS = "docs/design/findings/2026-11-17-marine-life-measured-accuracy.md"
+# The trained naming rows (issue #4724), on the same candidates and regions.
+_TRAINED_CONTENTS = {
+    "candidates.json": "4f0dc61c95ab06de3a0b2ecb1401260e23907c3d2ff09d2da165bd9c8c34d50c",
+    "text_embeddings.f16": "91f97b95c13886326f35a4bd976d06e7858aef05f7b6b03360135ed26bc13964",
+    "regions.bin": "f07736bd1c38fb5321b1900ebf0ab51555a9cf0715af4f364292202d953e4bcd",
+}
+_TRAINED_FINDINGS = "docs/design/findings/2026-11-20-marine-life-naming-layer.md"
 NAMING_MEASURED = [
     {
         "naming": {
@@ -203,6 +210,36 @@ NAMING_MEASURED = [
         "packVersion": "2026.11.18.0356",
         "contents": _MEASURED_CONTENTS,
         "findings": _FINDINGS,
+    },
+    # Both detectors with the trained naming rows (issue #4724), pack 2026.11.20.0513.
+    {
+        "naming": {
+            "provisional": False,
+            "minCropSide": 64,
+            "minOpenScore": 0.19,
+            "suggestScore": 0.47,
+            "confidentScore": 0.93,
+            "suggestScoreNoLocation": 0.46,
+            "confidentScoreNoLocation": 0.94,
+            "minAllowedCandidates": 200,
+            "topK": 5,
+            "precision": 0.865,
+            "levels": [
+                {
+                    "id": "balanced",
+                    "target": 0.75,
+                    "suggestScore": 0.33,
+                    "suggestScoreNoLocation": 0.39,
+                    "precision": 0.834,
+                },
+            ],
+        },
+        "detectorIds": [DETECTORS["cfd"]["id"], DETECTORS["megalodon"]["id"]],
+        "classifierId": "bioclip-2-vitl14-2957b32",
+        "cropFit": "centreCrop",
+        "packVersion": "2026.11.20.0513",
+        "contents": _TRAINED_CONTENTS,
+        "findings": _TRAINED_FINDINGS,
     },
 ]
 
