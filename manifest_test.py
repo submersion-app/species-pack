@@ -143,6 +143,7 @@ class MeasuredBarsTests(unittest.TestCase):
         "text_embeddings.f16": "91f97b95c13886326f35a4bd976d06e7858aef05f7b6b03360135ed26bc13964",
         "regions.bin": "f07736bd1c38fb5321b1900ebf0ab51555a9cf0715af4f364292202d953e4bcd",
     }
+    BAR_KEYS = ("minOpenScore", "suggestScore", "suggestScoreNoLocation", "confidentScore", "confidentScoreNoLocation")
 
     def test_the_measured_pack_gets_the_measured_bars(self):
         naming = manifest.naming_for([CFD], BIOCLIP, "centreCrop", self.MEASURED_PACK)
@@ -159,26 +160,17 @@ class MeasuredBarsTests(unittest.TestCase):
     def test_the_pair_pack_gets_its_own_measured_bars(self):
         naming = manifest.naming_for([CFD, MEGALODON], BIOCLIP, "centreCrop", self.MEASURED_PACK)
         self.assertIs(naming["provisional"], False)
-        self.assertEqual(
-            [naming[k] for k in ("minOpenScore", "suggestScore", "suggestScoreNoLocation", "confidentScore", "confidentScoreNoLocation")],
-            [0.44, 0.74, 0.81, 1.01, 1.01],
-        )
+        self.assertEqual([naming[k] for k in self.BAR_KEYS], [0.44, 0.74, 0.81, 1.01, 1.01])
 
     def test_a_megalodon_pack_gets_its_own_measured_bars(self):
         naming = manifest.naming_for([MEGALODON], BIOCLIP, "padSquare", self.MEASURED_PACK)
         self.assertIs(naming["provisional"], False)
-        self.assertEqual(
-            [naming[k] for k in ("minOpenScore", "suggestScore", "suggestScoreNoLocation", "confidentScore", "confidentScoreNoLocation")],
-            [0.21, 0.75, 0.70, 1.01, 1.01],
-        )
+        self.assertEqual([naming[k] for k in self.BAR_KEYS], [0.21, 0.75, 0.70, 1.01, 1.01])
 
     def test_the_trained_pair_pack_gets_its_own_measured_bars(self):
         naming = manifest.naming_for([CFD, MEGALODON], BIOCLIP, "centreCrop", self.TRAINED_PACK)
         self.assertIs(naming["provisional"], False)
-        self.assertEqual(
-            [naming[k] for k in ("minOpenScore", "suggestScore", "suggestScoreNoLocation", "confidentScore", "confidentScoreNoLocation")],
-            [0.19, 0.47, 0.46, 0.93, 0.94],
-        )
+        self.assertEqual([naming[k] for k in self.BAR_KEYS], [0.19, 0.47, 0.46, 0.93, 0.94])
         self.assertEqual(naming["precision"], 0.865)
         self.assertEqual(
             naming["levels"],
@@ -187,7 +179,10 @@ class MeasuredBarsTests(unittest.TestCase):
 
     def test_only_the_pair_is_measured_with_the_trained_rows(self):
         self.assertIs(manifest.naming_for([CFD], BIOCLIP, "centreCrop", self.TRAINED_PACK)["provisional"], True)
-        self.assertIs(manifest.naming_for([MEGALODON], BIOCLIP, "padSquare", self.TRAINED_PACK)["provisional"], True)
+        # Either fitting: the trained run measured centre crop best for
+        # Megalodon alone, while packs fit it to a square.
+        for fit in ("padSquare", "centreCrop"):
+            self.assertIs(manifest.naming_for([MEGALODON], BIOCLIP, fit, self.TRAINED_PACK)["provisional"], True, fit)
 
     def test_other_trained_rows_get_provisional_bars(self):
         other = {**self.TRAINED_PACK, "text_embeddings.f16": "0" * 64}
