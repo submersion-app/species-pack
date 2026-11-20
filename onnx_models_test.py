@@ -148,6 +148,38 @@ class SaveCheckedTests(unittest.TestCase):
             self.assertEqual(os.listdir(d), ["model.onnx"])
             onnx.checker.check_model(target)
 
+@unittest.skipUnless(HAVE_ONNX, "needs onnx and onnxruntime")
+class OutOfRangeWeightsTests(unittest.TestCase):
+    def test_a_weight_beyond_16_bits_stays_32_bit(self):
+        model, w = _matmul_model()
+        model.graph.initializer[0].CopyFrom(numpy_helper.from_array(w * 1e5, "W"))
+        converted = onnx_models.weights_to_float16(model)
+        kept = {i.name: i.data_type for i in converted.graph.initializer}
+        self.assertEqual(kept, {"W": TensorProto.FLOAT})
+        x = np.array([[1.0, 2.0, 3.0]], dtype=np.float32)
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "m.onnx")
+            onnx.save(converted, path)
+            (got,) = onnx_models.run(path, x)
+        np.testing.assert_allclose(got, x @ (w * 1e5), rtol=1e-6)
+
+
+class ExportedModelTests(unittest.TestCase):
+    def test_a_folder_gives_the_model_just_exported(self):
+        with tempfile.TemporaryDirectory() as d:
+            for name, when in (("a_old.onnx", 1_000), ("inference_model.onnx", 2_000)):
+                path = os.path.join(d, name)
+                with open(path, "wb") as fh:
+                    fh.write(b"x")
+                os.utime(path, (when, when))
+            self.assertEqual(onnx_models.exported_model(d), os.path.join(d, "inference_model.onnx"))
+
+    def test_a_file_is_itself_and_an_empty_folder_stops(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(onnx_models.exported_model(os.path.join(d, "m.onnx")), os.path.join(d, "m.onnx"))
+            with self.assertRaisesRegex(SystemExit, "no ONNX model"):
+                onnx_models.exported_model(d)
+
 
 if __name__ == "__main__":
     unittest.main()

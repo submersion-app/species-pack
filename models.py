@@ -73,20 +73,13 @@ def convert_detector_onnx(checkpoint, out_dir):
     (`<out_dir>/detector_onnx/model.onnx`), through the package's own
     exporter, checked against the original on the fixed scene as the Core
     ML one is."""
-    import glob
-
     import onnx
     from rfdetr import from_checkpoint
 
     import onnx_models
 
     model = from_checkpoint(checkpoint)
-    produced = str(model.export(output_dir=out_dir, format="onnx", verbose=False))
-    if os.path.isdir(produced):
-        found = sorted(glob.glob(os.path.join(produced, "*.onnx")))
-        if not found:
-            raise SystemExit(f"the detector's exporter left no ONNX model in {produced}")
-        produced = found[0]
+    produced = onnx_models.exported_model(str(model.export(output_dir=out_dir, format="onnx", verbose=False)))
     target_dir = os.path.join(out_dir, "detector_onnx")
     os.makedirs(target_dir, exist_ok=True)
     target = os.path.join(target_dir, onnx_models.MODEL_NAME)

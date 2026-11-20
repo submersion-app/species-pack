@@ -30,7 +30,8 @@ def _sha256(path):
 
 def _fetch(url, dest):
     request = urllib.request.Request(url, headers={"User-Agent": "species-pack-builder/0.1"})
-    with urllib.request.urlopen(request) as response, open(dest, "wb") as fh:
+    # A stalled connection fails, so the scorer can be run again.
+    with urllib.request.urlopen(request, timeout=60) as response, open(dest, "wb") as fh:
         while True:
             chunk = response.read(1 << 20)
             if not chunk:

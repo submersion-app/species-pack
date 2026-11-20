@@ -34,7 +34,15 @@ def weights_to_float16(model):
         if init.data_type != TensorProto.FLOAT or init.name in graph_inputs:
             kept.append(init)
             continue
-        half = numpy_helper.from_array(numpy_helper.to_array(init).astype(np.float16), f"{init.name}_f16")
+        weights = numpy_helper.to_array(init)
+        with np.errstate(over="ignore"):
+            narrowed = weights.astype(np.float16)
+        # A weight beyond 16-bit range would become infinite: that one
+        # stays 32-bit.
+        if not np.array_equal(np.isfinite(narrowed), np.isfinite(weights)):
+            kept.append(init)
+            continue
+        half = numpy_helper.from_array(narrowed, f"{init.name}_f16")
         kept.append(half)
         casts.append(
             helper.make_node("Cast", [half.name], [init.name], to=TensorProto.FLOAT, name=f"{init.name}_to_float")
@@ -46,6 +54,20 @@ def weights_to_float16(model):
     graph.node.extend(casts + nodes)
     model.ir_version = min(model.ir_version, MAX_IR_VERSION)
     return model
+
+
+def exported_model(produced):
+    """The model an exporter produced: `produced` itself when it is a file,
+    else the newest `.onnx` in that folder, which may also hold models an
+    earlier export left. Stops when the folder holds none."""
+    import glob
+
+    if not os.path.isdir(produced):
+        return produced
+    found = glob.glob(os.path.join(produced, "*.onnx"))
+    if not found:
+        raise SystemExit(f"the exporter left no ONNX model in {produced}")
+    return max(found, key=os.path.getmtime)
 
 
 def save_checked(model, target, check):

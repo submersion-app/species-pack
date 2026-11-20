@@ -78,6 +78,21 @@ class LibraryTests(unittest.TestCase):
 
         ort_library.macos_library(self.tmp.name, fetch=no_fetch, **kwargs)
 
+class FetchTests(unittest.TestCase):
+    def test_the_download_gives_up_on_a_stalled_connection(self):
+        seen = {}
+
+        def urlopen(request, timeout=None):
+            seen["timeout"] = timeout
+            raise OSError("stalled")
+
+        original = ort_library.urllib.request.urlopen
+        ort_library.urllib.request.urlopen = urlopen
+        self.addCleanup(setattr, ort_library.urllib.request, "urlopen", original)
+        with tempfile.TemporaryDirectory() as d, self.assertRaises(OSError):
+            ort_library._fetch("https://example.org/p.nupkg", os.path.join(d, "p"))
+        self.assertTrue(seen["timeout"])
+
 
 if __name__ == "__main__":
     unittest.main()

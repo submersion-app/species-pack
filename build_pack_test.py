@@ -192,6 +192,17 @@ class ModelFilesTests(unittest.TestCase):
         files = self.build("--engines", "coreml")
         self.assertEqual({engine for _, engine in files}, {"coreml"})
 
+    def test_an_engine_not_built_leaves_none_of_its_zips(self):
+        self.build()
+        out = os.path.join(self.tmp.name, "out")
+        work = os.path.join(self.tmp.name, "work")
+        args = build_pack.parse_args(
+            ["--out", out, "--work", work, "--megalodon-work", work, "--engines", "coreml"]
+        )
+        stub = _Stub(work)
+        build_pack.model_files(args, models=stub, megalodon_module=stub)
+        self.assertEqual([n for n in os.listdir(out) if n.endswith(".onnx.zip")], [])
+
 
 if __name__ == "__main__":
     unittest.main()

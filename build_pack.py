@@ -131,6 +131,10 @@ def model_files(args, *, models, megalodon_module):
             stale = os.path.join(args.out, mf.model_zip(detector["file"], engine))
             if (engine not in args.engines or detector["id"] not in mf.detector_ids(args.detectors)) and os.path.exists(stale):
                 os.remove(stale)
+        # The classifier of an engine this build leaves out is stale too.
+        stale = os.path.join(args.out, mf.model_zip("classifier", engine))
+        if engine not in args.engines and os.path.exists(stale):
+            os.remove(stale)
     entries = []
     checkpoint = None
     if "coreml" in args.engines:
