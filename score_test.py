@@ -125,6 +125,43 @@ class PathTests(unittest.TestCase):
         self.assertEqual(args.work, os.path.abspath(os.path.join("w", "x")))
         self.assertIsNone(args.naming_from)
 
+class OnnxRunTests(unittest.TestCase):
+    def test_the_onnx_fingerprint_covers_what_its_output_depends_on(self):
+        onnx = {os.path.basename(p) for p in score.source_files("onnx")}
+        for dart in ("vision_analysis.dart", "species_pack_manifest.dart", "ort_native.dart", "ort_c_api.g.dart"):
+            self.assertIn(dart, onnx)
+
+    def test_an_onnx_run_records_no_peak_memory(self):
+        timing = "  123456  maximum resident set size"
+        self.assertEqual(score.peak_memory("coreml", timing), 123456)
+        self.assertIsNone(score.peak_memory("onnx", timing))
+
+    def test_a_failing_runner_stops_with_its_output(self):
+        import sys as _sys
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaisesRegex(SystemExit, "boom"):
+                score.run_logged(
+                    [_sys.executable, "-c", "print('boom'); raise SystemExit(3)"],
+                    cwd=d,
+                    env=dict(os.environ),
+                    log=os.path.join(d, "runner.txt"),
+                )
+
+
+class EvaluateHelperTests(unittest.TestCase):
+    def test_each_held_out_junk_crop_is_paired_with_its_own_result(self):
+        crops = [{"row": {"detector": "cfd", "id": "7", "box": "0"}}, {"row": {"detector": "mega", "id": "7", "box": "1"}}]
+        self.assertEqual(score.junk_named_by_row(crops, [False, True]), {"cfd:7:0": False, "mega:7:1": True})
+
+    def test_the_held_out_check_is_at_the_fixed_bars_only(self):
+        self.assertIsNone(score.fixed_bars_held_out(None, [], min_side=64))
+        fixed = bars.Bars(min_open=0.1, suggest=0.7, suggest_no_location=0.8, confident=0.93, confident_no_location=1.01)
+        # With nothing held out there is no evidence, so no bar stands.
+        held = score.fixed_bars_held_out(fixed, [], min_side=64)
+        self.assertEqual(sorted(held["switched off"]), ["confidentScore", "suggestScore", "suggestScoreNoLocation"])
+
 
 if __name__ == "__main__":
     unittest.main()

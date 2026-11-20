@@ -77,7 +77,12 @@ ONNX_SOURCES = (
     ("lib", "features", "species_id", "data", "engines", "onnx", "onnx_worker_core.dart"),
     ("lib", "features", "species_id", "data", "engines", "onnx", "ort_model_runner.dart"),
     ("lib", "features", "species_id", "data", "engines", "onnx", "scoring_line.dart"),
+    # VisionModels.fromManifest and CropFit, and the manifest it reads.
+    ("lib", "features", "species_id", "domain", "entities", "vision_analysis.dart"),
+    ("lib", "features", "species_id", "domain", "entities", "species_pack_manifest.dart"),
     ("packages", "submersion_vision", "lib", "src", "ort", "ort_runtime.dart"),
+    ("packages", "submersion_vision", "lib", "src", "ort", "ort_native.dart"),
+    ("packages", "submersion_vision", "lib", "src", "ort", "ort_c_api.g.dart"),
     ONNX_RUNNER,
 )
 
@@ -214,6 +219,8 @@ class Runner:
                     # The converted model itself, so converting again reruns.
                     None if self.mega_from_pack else self._megalodon_stamp(),
                     self.engine,
+                    # The ONNX Runtime library the runner loads on this Mac.
+                    self._library_pin(),
                 ]
             ).encode()
         )
@@ -222,6 +229,13 @@ class Runner:
             with open(source, "rb") as fh:
                 digest.update(fh.read())
         return digest.hexdigest()
+
+    def _library_pin(self):
+        if self.engine == "coreml":
+            return None
+        import ort_library
+
+        return ort_library.DYLIB_SHA256
 
     def _megalodon_stamp(self):
         if self.engine == "coreml":
@@ -284,15 +298,12 @@ class Runner:
                 ),
                 fh,
             )
-        with open(timing or os.devnull, "w", encoding="utf-8") as err:
-            subprocess.run(
-                ["/usr/bin/time", "-l", "flutter", "test", os.path.join(*ONNX_RUNNER)],
-                cwd=app_repo.app_root(),
-                env={**os.environ, "SPECIES_VISION_REQUEST": request_path},
-                stdout=err,
-                stderr=err,
-                check=True,
-            )
+        run_logged(
+            ["flutter", "test", os.path.join(*ONNX_RUNNER)],
+            cwd=app_repo.app_root(),
+            env={**os.environ, "SPECIES_VISION_REQUEST": request_path},
+            log=timing or out + ".runner.txt",
+        )
         os.replace(out + ".partial", out)
 
     def run(self, name, fit, photos):
@@ -307,8 +318,7 @@ class Runner:
             with open(key_path, "w", encoding="utf-8") as fh:
                 fh.write(key + "\n")
         with open(mem, encoding="utf-8") as fh:
-            m = re.search(r"(\d+)\s+maximum resident set size", fh.read())
-        self.memory[(name, fit)] = int(m.group(1)) if m else None
+            self.memory[(name, fit)] = peak_memory(self.engine, fh.read())
         results = {}
         with open(out, encoding="utf-8") as fh:
             for line in fh:
@@ -489,6 +499,47 @@ def _junk_records(name, results_by_photo, junk_rows, namer, work, fish_cells, st
     return records, missing
 
 
+def peak_memory(engine, timing):
+    """The run's peak memory from `/usr/bin/time -l`'s output, in bytes; None
+    for an ONNX run, which is not timed that way: there the measured process
+    would be the flutter tool, not the test host running the models."""
+    if engine != "coreml":
+        return None
+    m = re.search(r"(\d+)\s+maximum resident set size", timing)
+    return int(m.group(1)) if m else None
+
+
+def run_logged(command, *, cwd, env, log):
+    """Runs `command` with its output in `log`; when it fails, stops with the
+    output's last lines, so a failing runner says why."""
+    with open(log, "w", encoding="utf-8") as fh:
+        done = subprocess.run(command, cwd=cwd, env=env, stdout=fh, stderr=subprocess.STDOUT)
+    if done.returncode != 0:
+        with open(log, encoding="utf-8", errors="replace") as fh:
+            tail = "".join(fh.readlines()[-30:])
+        raise SystemExit(f"{' '.join(command)} failed ({done.returncode}); its output, in {log}:\n{tail}")
+
+
+def junk_named_by_row(held_junk, junk_named):
+    """Each held-out junk crop's row key and whether it was named, for
+    pairing two engines' junk (engine_gate.py)."""
+    return {
+        f"{c['row']['detector']}:{c['row']['id']}:{c['row']['box']}": bool(named)
+        for c, named in zip(held_junk, junk_named, strict=True)
+    }
+
+
+def fixed_bars_held_out(fixed_bars, held_nat, *, min_side):
+    """Whether fixed bars still stand held out on this run (the engine
+    gate's first check), or None when the bars were chosen, not fixed."""
+    if fixed_bars is None:
+        return None
+    _, switched_off = bar_search.held_out_gate(
+        fixed_bars, [c["with"] for c in held_nat], [c["without"] for c in held_nat], min_side=min_side
+    )
+    return {"switched off": switched_off}
+
+
 def absolute_paths(args):
     """Makes the pack and work folders absolute, in place: the ONNX runner
     runs in the app's folder, so a relative path would name another one."""
@@ -550,15 +601,9 @@ def evaluate(
     gated, switched_off = bar_search.held_out_gate(
         chosen, [c["with"] for c in held_nat], [c["without"] for c in held_nat], min_side=min_side
     )
-    fixed_held_out = None
+    fixed_held_out = fixed_bars_held_out(fixed_bars, held_nat, min_side=min_side)
     if fixed_bars is not None:
         chosen, gated, switched_off = fixed_bars, fixed_bars, []
-        # Whether the bars given still stand held out on this run: the
-        # engine gate's first check (engine_gate.py).
-        _, fixed_switched_off = bar_search.held_out_gate(
-            fixed_bars, [c["with"] for c in held_nat], [c["without"] for c in held_nat], min_side=min_side
-        )
-        fixed_held_out = {"switched off": fixed_switched_off}
 
     # The naming levels (issue #4721), surest first, each chosen on the tune
     # half and kept only if it stands held out. They are measured under the
@@ -702,10 +747,7 @@ def evaluate(
         "_per_photo": per_photo(animals),
         # Held-out junk crops, by row: whether each was named, for pairing
         # two engines' junk (engine_gate.py).
-        "_junk_per_photo": {
-            f"{c['row']['detector']}:{c['row']['id']}:{c['row']['box']}": bool(named)
-            for c, named in zip(held_junk, junk_named)
-        },
+        "_junk_per_photo": junk_named_by_row(held_junk, junk_named),
     }
 
 
