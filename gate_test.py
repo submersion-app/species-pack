@@ -380,5 +380,36 @@ class VerdictTest(unittest.TestCase):
         self.assertFalse(bad["ship"])
 
 
+class SetKeyTest(unittest.TestCase):
+    """The scores a gate reads are those of the combination the pack ships."""
+
+    def pack(self, detector_set):
+        return mf.build_manifest(
+            pack_version="v",
+            detector_set=detector_set,
+            classifier_id="bioclip-2-vitl14-2957b32",
+            embedding_size=768,
+            files=[],
+            credits=[],
+            naming={"provisional": True},
+        )
+
+    def test_a_single_detector_pack_is_keyed_by_its_detector(self):
+        pack = self.pack("cfd")
+        self.assertEqual(
+            gate.pack_set_key(pack), f"{mf.DETECTORS['cfd']['id']} {pack['classifier']['cropFit']}"
+        )
+
+    def test_a_pair_is_keyed_both(self):
+        pack = self.pack("both")
+        self.assertEqual(gate.pack_set_key(pack), f"both {pack['classifier']['cropFit']}")
+
+    def test_scores_of_another_combination_are_refused(self):
+        pack = self.pack("cfd")
+        gate.confirm_set_key(pack, gate.pack_set_key(pack))
+        with self.assertRaisesRegex(SystemExit, "not the combination this pack ships"):
+            gate.confirm_set_key(pack, "both centreCrop")
+
+
 if __name__ == "__main__":
     unittest.main()

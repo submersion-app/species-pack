@@ -141,6 +141,14 @@ def check(coreml_per_photo, onnx_per_photo, onnx_eval, coreml_junk, onnx_junk):
     return result
 
 
+def chosen_set_key(manifest, asked):
+    """The scores to read: the combination the pack ships, which an asked
+    key must name (gate.confirm_set_key)."""
+    key = asked or gate.pack_set_key(manifest)
+    gate.confirm_set_key(manifest, key)
+    return key
+
+
 def _read(folder, name):
     with open(os.path.join(folder, name), encoding="utf-8") as fh:
         return json.load(fh)
@@ -150,25 +158,29 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--work", required=True, help="score.py's work folder: Core ML results, ONNX ones in onnx/")
     parser.add_argument("--pack", required=True, help="the pack both runs scored")
-    parser.add_argument("--set-key", default=gate.SET_KEY, help="the detector set and fitting the pack names with")
+    parser.add_argument(
+        "--set-key",
+        help="the detector set and fitting to read; by default the pack's own, and no other is accepted",
+    )
     args = parser.parse_args(argv)
     folders = {"coreml": args.work, "onnx": os.path.join(args.work, "onnx")}
     manifest = _read(args.pack, "manifest.json")
+    set_key = chosen_set_key(manifest, args.set_key)
     results, per_photo, per_junk = {}, {}, {}
     for engine, folder in folders.items():
         results[engine] = _read(folder, "results.json")
         gate.confirm_engine(results[engine], engine, folder)
         gate.confirm_scored(results[engine], manifest, engine)
-        per_photo[engine] = _read(folder, "per_photo.json")[args.set_key]
-        per_junk[engine] = _read(folder, "per_junk.json")[args.set_key]
+        per_photo[engine] = _read(folder, "per_photo.json")[set_key]
+        per_junk[engine] = _read(folder, "per_junk.json")[set_key]
     gate.confirm_same_photos(per_photo["coreml"], per_photo["onnx"], runs="Core ML and ONNX")
     confirm_pack_bars(
-        manifest, results["coreml"]["evaluations"][args.set_key], results["onnx"]["evaluations"][args.set_key]
+        manifest, results["coreml"]["evaluations"][set_key], results["onnx"]["evaluations"][set_key]
     )
     result = check(
         per_photo["coreml"],
         per_photo["onnx"],
-        results["onnx"]["evaluations"][args.set_key],
+        results["onnx"]["evaluations"][set_key],
         per_junk["coreml"],
         per_junk["onnx"],
     )

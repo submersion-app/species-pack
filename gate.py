@@ -35,6 +35,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import bars as bar_search  # noqa: E402
+import manifest as pack_manifest  # noqa: E402
 import testset  # noqa: E402
 import training_set as ts  # noqa: E402
 
@@ -103,6 +104,23 @@ def rare_check(check_per_photo, held_back):
         "rate": rate,
         "interval": bar_search.wilson(wrong, len(photos), bar_search.Z_TWO_SIDED),
     }
+
+
+def pack_set_key(manifest):
+    """score.py's key for the combination a pack ships: its one detector's
+    id, or "both" for the pair, then its classifier's crop fit."""
+    detectors, _ = pack_manifest.pack_detectors(manifest)
+    name = detectors[0]["id"] if len(detectors) == 1 else "both"
+    return f"{name} {manifest['classifier']['cropFit']}"
+
+
+def confirm_set_key(manifest, key):
+    """Stops unless `key` is the combination the pack ships: score.py
+    scores every combination, and the pack's bars apply to each, so a gate
+    read at another one would pass a combination nobody runs."""
+    shipped = pack_set_key(manifest)
+    if key != shipped:
+        raise SystemExit(f"the scores at {key!r} are not the combination this pack ships ({shipped!r})")
 
 
 def confirm_scored(results, manifest, label):
@@ -273,6 +291,8 @@ def main(argv=None):
     ):
         results[label] = _read(folder, "results.json")
         manifests[label] = _read(pack, "manifest.json")
+        # The naming layer is measured on the combination the pack ships.
+        confirm_set_key(manifests[label], SET_KEY)
         # The naming checks are measured on Core ML; ONNX joins through
         # engine_check alone.
         confirm_engine(results[label], "coreml", label)

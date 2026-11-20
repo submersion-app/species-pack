@@ -151,5 +151,17 @@ class PackBarsTests(unittest.TestCase):
             self.confirm(naming={"provisional": True})
 
 
+class SetKeyChoiceTest(unittest.TestCase):
+    def test_the_key_comes_from_the_pack_unless_asked(self):
+        pack = {
+            "detectors": [{"id": "cfd-x"}],
+            "boxes": {},
+            "classifier": {"cropFit": "padSquare"},
+        }
+        self.assertEqual(engine_gate.chosen_set_key(pack, None), "cfd-x padSquare")
+        with self.assertRaisesRegex(SystemExit, "not the combination this pack ships"):
+            engine_gate.chosen_set_key(pack, "both centreCrop")
+
+
 if __name__ == "__main__":
     unittest.main()
