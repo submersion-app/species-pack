@@ -111,5 +111,43 @@ class ZipTests(unittest.TestCase):
             self.assertEqual(manifest.model_in(d), os.path.join(d, "model.onnx"))
 
 
+@unittest.skipUnless(HAVE_ONNX, "needs onnx and onnxruntime")
+class SaveCheckedTests(unittest.TestCase):
+    """A converted model reaches its target only after its check passes on
+    the saved file, so a build never zips one that failed."""
+
+    def test_a_model_that_fails_its_check_is_not_left_behind(self):
+        model, _ = _matmul_model()
+
+        def drifted(path):
+            raise SystemExit("converted model differs from the original")
+
+        with tempfile.TemporaryDirectory() as d:
+            target = os.path.join(d, "model.onnx")
+            with open(target, "wb") as fh:
+                fh.write(b"an older conversion")
+            with self.assertRaisesRegex(SystemExit, "differs"):
+                onnx_models.save_checked(model, target, drifted)
+            self.assertEqual(os.listdir(d), [])
+
+    def test_a_model_that_passes_is_saved_at_its_target_after_its_check(self):
+        model, w = _matmul_model()
+        model = onnx_models.weights_to_float16(model)
+        checked = []
+
+        def check(path):
+            x = np.array([[1.0, 2.0, 3.0]], dtype=np.float32)
+            (got,) = onnx_models.run(path, x)
+            np.testing.assert_allclose(got, x @ w)
+            checked.append(os.path.exists(target))
+
+        with tempfile.TemporaryDirectory() as d:
+            target = os.path.join(d, "model.onnx")
+            self.assertEqual(onnx_models.save_checked(model, target, check), target)
+            self.assertEqual(checked, [False], "checked before it reached the target")
+            self.assertEqual(os.listdir(d), ["model.onnx"])
+            onnx.checker.check_model(target)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -48,6 +48,27 @@ def weights_to_float16(model):
     return model
 
 
+def save_checked(model, target, check):
+    """Saves `model` (an onnx ModelProto) at `target` only once
+    `check(path)` passes on the saved file. It is written beside the
+    target first and moved there after the check; any older model at
+    `target` is removed before, so a conversion that fails its check
+    leaves nothing a build could zip."""
+    import onnx
+
+    if os.path.exists(target):
+        os.remove(target)
+    pending = target + ".unchecked"
+    onnx.save(model, pending)
+    try:
+        check(pending)
+    except BaseException:
+        os.remove(pending)
+        raise
+    os.replace(pending, target)
+    return target
+
+
 def zip_onnx(model_path, dest_zip):
     """Zips the model at `model_path` as `model.onnx` at the top of
     `dest_zip`, with its external weights file (`<model>.data`) beside it

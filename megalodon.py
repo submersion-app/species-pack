@@ -206,12 +206,14 @@ def convert_onnx(name, work, check_image):
     torch.onnx.export(
         model, example, raw, input_names=["image"], output_names=["detections"], opset_version=17, dynamo=False
     )
-    target = os.path.join(out_dir, onnx_models.MODEL_NAME)
-    onnx.save(onnx_models.weights_to_float16(onnx.load(raw)), target)
+    converted = onnx_models.weights_to_float16(onnx.load(raw))
     os.remove(raw)
-    (got,) = onnx_models.run(target, x)
-    _check_converted(name, reference, np.asarray(got, dtype=np.float32))
-    return target
+
+    def check(path):
+        (got,) = onnx_models.run(path, x)
+        _check_converted(name, reference, np.asarray(got, dtype=np.float32))
+
+    return onnx_models.save_checked(converted, os.path.join(out_dir, onnx_models.MODEL_NAME), check)
 
 
 def onnx_model(work, name):

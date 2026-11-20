@@ -90,9 +90,9 @@ def convert_detector_onnx(checkpoint, out_dir):
     target_dir = os.path.join(out_dir, "detector_onnx")
     os.makedirs(target_dir, exist_ok=True)
     target = os.path.join(target_dir, onnx_models.MODEL_NAME)
-    onnx.save(onnx_models.weights_to_float16(onnx.load(produced)), target)
-    check_detector_onnx(model, target)
-    return target
+    return onnx_models.save_checked(
+        onnx_models.weights_to_float16(onnx.load(produced)), target, lambda path: check_detector_onnx(model, path)
+    )
 
 
 def _test_scene():
@@ -252,14 +252,16 @@ def convert_classifier_onnx(out_dir):
     torch.onnx.export(
         visual, x, raw, input_names=["image"], output_names=["embedding"], opset_version=17, dynamo=False
     )
-    target = os.path.join(target_dir, onnx_models.MODEL_NAME)
-    onnx.save(onnx_models.weights_to_float16(onnx.load(raw)), target)
+    converted = onnx_models.weights_to_float16(onnx.load(raw))
     os.remove(raw)
-    (got,) = onnx_models.run(target, x.numpy())
-    cosine = onnx_models.cosine(ref, got)
-    if cosine < 0.999:
-        raise SystemExit(f"converted ONNX classifier differs from the original (cosine {cosine:.5f})")
-    return target
+
+    def check(path):
+        (got,) = onnx_models.run(path, x.numpy())
+        cosine = onnx_models.cosine(ref, got)
+        if not cosine >= 0.999:
+            raise SystemExit(f"converted ONNX classifier differs from the original (cosine {cosine:.5f})")
+
+    return onnx_models.save_checked(converted, os.path.join(target_dir, onnx_models.MODEL_NAME), check)
 
 
 def text_embeddings(candidates):
