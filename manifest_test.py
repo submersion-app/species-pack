@@ -136,6 +136,13 @@ class MeasuredBarsTests(unittest.TestCase):
         "text_embeddings.f16": "957f0e7ee016dc7ef99a1b96c81b81130439b5dbb9b9170e0d190839b0e1b20e",
         "regions.bin": "ec2f86088a9bd113b7faa96550168e8672ed7e63f6cb2b6d0d64f43e15ac426f",
     }
+    # Pack 2026.11.20.0513: the 0356 pack with trained naming rows (issue
+    # #4724), hashed from its files rather than copied from manifest.py.
+    TRAINED_PACK = {
+        "candidates.json": "4f0dc61c95ab06de3a0b2ecb1401260e23907c3d2ff09d2da165bd9c8c34d50c",
+        "text_embeddings.f16": "91f97b95c13886326f35a4bd976d06e7858aef05f7b6b03360135ed26bc13964",
+        "regions.bin": "f07736bd1c38fb5321b1900ebf0ab51555a9cf0715af4f364292202d953e4bcd",
+    }
 
     def test_the_measured_pack_gets_the_measured_bars(self):
         naming = manifest.naming_for([CFD], BIOCLIP, "centreCrop", self.MEASURED_PACK)
@@ -164,6 +171,28 @@ class MeasuredBarsTests(unittest.TestCase):
             [naming[k] for k in ("minOpenScore", "suggestScore", "suggestScoreNoLocation", "confidentScore", "confidentScoreNoLocation")],
             [0.21, 0.75, 0.70, 1.01, 1.01],
         )
+
+    def test_the_trained_pair_pack_gets_its_own_measured_bars(self):
+        naming = manifest.naming_for([CFD, MEGALODON], BIOCLIP, "centreCrop", self.TRAINED_PACK)
+        self.assertIs(naming["provisional"], False)
+        self.assertEqual(
+            [naming[k] for k in ("minOpenScore", "suggestScore", "suggestScoreNoLocation", "confidentScore", "confidentScoreNoLocation")],
+            [0.19, 0.47, 0.46, 0.93, 0.94],
+        )
+        self.assertEqual(naming["precision"], 0.865)
+        self.assertEqual(
+            naming["levels"],
+            [{"id": "balanced", "target": 0.75, "suggestScore": 0.33, "suggestScoreNoLocation": 0.39, "precision": 0.834}],
+        )
+
+    def test_only_the_pair_is_measured_with_the_trained_rows(self):
+        self.assertIs(manifest.naming_for([CFD], BIOCLIP, "centreCrop", self.TRAINED_PACK)["provisional"], True)
+        self.assertIs(manifest.naming_for([MEGALODON], BIOCLIP, "padSquare", self.TRAINED_PACK)["provisional"], True)
+
+    def test_other_trained_rows_get_provisional_bars(self):
+        other = {**self.TRAINED_PACK, "text_embeddings.f16": "0" * 64}
+        naming = manifest.naming_for([CFD, MEGALODON], BIOCLIP, "centreCrop", other)
+        self.assertEqual(naming, manifest.NAMING_PROVISIONAL)
 
     def test_build_manifest_writes_the_pairs_bars_for_a_pair_pack(self):
         built = manifest.build_manifest(
