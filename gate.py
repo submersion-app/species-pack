@@ -191,8 +191,8 @@ def engine_check(manifest, coreml, onnx):
     `coreml` and `onnx` are the pack's two scored runs, each a dict of its
     "results", "per_photo" and "per_junk" for SET_KEY; `onnx` is None when
     --trained-onnx was not given. Stops unless the ONNX run is the ONNX
-    engine's, on this pack, covering the same photos, at the bars the Core
-    ML run chose: the engines are compared at the bars the pack ships."""
+    engine's, on this pack, covering the same photos, and both runs named at
+    the bars the pack ships: the engines are compared at those bars."""
     if not has_onnx_models(manifest):
         if onnx is not None:
             raise SystemExit(_NO_ONNX_MODELS)
@@ -207,13 +207,12 @@ def engine_check(manifest, coreml, onnx):
     confirm_scored(onnx["results"], manifest, "trained ONNX")
     confirm_same_photos(coreml["per_photo"], onnx["per_photo"], runs="trained pack's Core ML and ONNX")
     onnx_eval = onnx["results"]["evaluations"][SET_KEY]
-    named_at = onnx_eval["bars after held-out gate"]
-    chosen = coreml["results"]["evaluations"][SET_KEY]["bars after held-out gate"]
-    if any(abs(named_at[k] - chosen[k]) > 1e-9 for k in chosen):
-        raise SystemExit(f"--trained-onnx was named at bars {named_at}, not the trained pack's {chosen}")
     # Here, not at the top: engine_gate imports this module.
     import engine_gate
 
+    # Both runs at the bars this pack ships: equal to each other is not
+    # enough, as two runs named from another pack would agree.
+    engine_gate.confirm_pack_bars(manifest, coreml["results"]["evaluations"][SET_KEY], onnx_eval)
     return engine_gate.check(coreml["per_photo"], onnx["per_photo"], onnx_eval, coreml["per_junk"], onnx["per_junk"])
 
 

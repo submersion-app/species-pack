@@ -49,6 +49,16 @@ def _outcome(embedding, shorter_side, text_rows, scale, config):
     return named.ranked[0][0], suggested
 
 
+def _readable(embedding):
+    """Whether an embedding has values, all finite, not all zero."""
+    import numpy as np
+
+    if not embedding:
+        return False
+    v = np.asarray(embedding, dtype=np.float64)
+    return bool(np.all(np.isfinite(v)) and np.any(v != 0))
+
+
 def _cosine(a, b):
     """The cosine of two embeddings; NaN when either is zero or not a
     number, which no floor accepts."""
@@ -66,6 +76,15 @@ def compare(reference, other, text_rows, scale, config):
     (read_run). Both runs must cover the same photos with no error line."""
     one_side = len(set(reference) ^ set(other))
     errors = sum(1 for run in (reference, other) for row in run.values() if "error" in row)
+    # Every crop's embedding must be readable, matched or not: a box only
+    # one machine found must not hide a zero or broken embedding.
+    invalid = sum(
+        1
+        for run in (reference, other)
+        for row in run.values()
+        for d in row.get("detections", [])
+        if not _readable(d.get("embedding"))
+    )
     crops = unmatched = below = same = 0
     lowest = 1.0
     for path in sorted(set(reference) & set(other)):
@@ -102,7 +121,13 @@ def compare(reference, other, text_rows, scale, config):
     total = crops + unmatched
     share = same / total if total else 1.0
     return {
-        "pass": below == 0 and share >= SAME_SHARE_FLOOR and total > 0 and one_side == 0 and errors == 0,
+        "pass": below == 0
+        and share >= SAME_SHARE_FLOOR
+        and total > 0
+        and one_side == 0
+        and errors == 0
+        and invalid == 0,
+        "invalid embeddings": invalid,
         "photos": len(set(reference) | set(other)),
         "photos in one run only": one_side,
         "error lines": errors,

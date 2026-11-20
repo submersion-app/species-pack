@@ -246,7 +246,15 @@ class EngineCheckTest(unittest.TestCase):
         if onnx:
             files.append({"name": "detector-cfd.onnx.zip", "engine": "onnx", "size": 1, "sha256": "e" * 64})
         files.append({"name": "text_embeddings.f16", "engine": "all", "size": 1, "sha256": "b" * 64})
-        return {"packVersion": "v", "files": files}
+        naming = {
+            "provisional": False,
+            "minOpenScore": 0.1,
+            "suggestScore": 0.7,
+            "suggestScoreNoLocation": 0.8,
+            "confidentScore": 0.93,
+            "confidentScoreNoLocation": 1.01,
+        }
+        return {"packVersion": "v", "files": files, "naming": naming}
 
     def scores(self, manifest, *, engine, right=300, bars=None, switched_off=()):
         results = {
@@ -334,6 +342,18 @@ class EngineCheckTest(unittest.TestCase):
     def test_onnx_scores_of_another_pack_are_refused(self):
         with self.assertRaisesRegex(SystemExit, "pack"):
             self.check(onnx=self.scores({**self.manifest(), "packVersion": "w"}, engine="onnx"))
+
+    def test_runs_both_at_another_pack_s_bars_are_refused(self):
+        # Two runs scored with --naming-from another pack agree with each
+        # other, but not with the bars this pack ships.
+        manifest = self.manifest()
+        other = {**self.BARS, "suggest": 0.6}
+        with self.assertRaisesRegex(SystemExit, "not the pack's"):
+            gate.engine_check(
+                manifest,
+                self.scores(manifest, engine=None, bars=other),
+                self.scores(manifest, engine="onnx", bars=other),
+            )
 
     def test_onnx_scores_named_at_other_bars_are_refused(self):
         with self.assertRaisesRegex(SystemExit, "bars"):

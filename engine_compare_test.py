@@ -93,6 +93,15 @@ class CompareTests(unittest.TestCase):
         self.assertFalse(result["pass"])
         self.assertEqual(result["below cosine floor"], 1)
 
+    def test_an_invalid_embedding_on_an_unmatched_box_fails(self):
+        reference = {f"p{i}": line(f"p{i}", [[1.0, 0.1]]) for i in range(100)}
+        other = dict(reference)
+        # A second box only the other run found, with an all-zero embedding.
+        other["p0"] = line("p0", [[1.0, 0.1], [0.0, 0.0]])
+        result = compare(reference, other)
+        self.assertFalse(result["pass"])
+        self.assertEqual(result["invalid embeddings"], 1)
+
     def test_each_run_is_named_at_its_own_crop_size(self):
         reference = {f"p{i}": line(f"p{i}", [[1.0, 0.1]]) for i in range(100)}
         other = {k: {**v, "detections": [dict(d) for d in v["detections"]]} for k, v in reference.items()}
