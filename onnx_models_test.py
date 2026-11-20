@@ -162,6 +162,43 @@ class OutOfRangeWeightsTests(unittest.TestCase):
             onnx.save(converted, path)
             (got,) = onnx_models.run(path, x)
         np.testing.assert_allclose(got, x @ (w * 1e5), rtol=1e-6)
+    def test_a_small_constant_like_an_epsilon_stays_32_bit(self):
+        model, w = _matmul_model()
+        model.graph.initializer.append(numpy_helper.from_array(np.array(1e-12, dtype=np.float32), "eps"))
+        converted = onnx_models.weights_to_float16(model)
+        kinds = {i.name: i.data_type for i in converted.graph.initializer}
+        self.assertEqual(kinds["eps"], TensorProto.FLOAT)
+        self.assertEqual(kinds["W_f16"], TensorProto.FLOAT16, "a real weight still narrows")
+
+
+@unittest.skipUnless(HAVE_ONNX, "needs numpy")
+class DetectorCheckTests(unittest.TestCase):
+    """The RF-DETR conversion check, with a stand-in model and scene."""
+
+    def setUp(self):
+        self.models = _load("models")
+        self.models._test_scene = lambda: np.zeros((640, 640, 3), dtype=np.uint8)
+
+    class _Model:
+        def predict(self, scene, threshold):
+            class _Found:
+                confidence = np.array([0.9])
+                xyxy = np.array([[100.0, 100.0, 200.0, 200.0]])
+
+            return _Found()
+
+    @staticmethod
+    def outputs(logit):
+        boxes = np.array([[[150 / 640, 150 / 640, 100 / 640, 100 / 640]]], dtype=np.float32)
+        return [boxes, np.full((1, 1, 1), logit, dtype=np.float32)]
+
+    def test_a_matching_conversion_passes(self):
+        self.models._compare_detector(self._Model(), lambda x: self.outputs(float(np.log(0.9 / 0.1))))
+
+    def test_a_conversion_that_outputs_nan_is_refused(self):
+        with self.assertRaisesRegex(SystemExit, "differs"):
+            self.models._compare_detector(self._Model(), lambda x: self.outputs(float("nan")))
+
 
 
 class ExportedModelTests(unittest.TestCase):

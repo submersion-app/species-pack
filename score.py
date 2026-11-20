@@ -513,7 +513,10 @@ def run_logged(command, *, cwd, env, log):
     """Runs `command` with its output in `log`; when it fails, stops with the
     output's last lines, so a failing runner says why."""
     with open(log, "w", encoding="utf-8") as fh:
-        done = subprocess.run(command, cwd=cwd, env=env, stdout=fh, stderr=subprocess.STDOUT)
+        try:
+            done = subprocess.run(command, cwd=cwd, env=env, stdout=fh, stderr=subprocess.STDOUT)
+        except FileNotFoundError:
+            raise SystemExit(f"{command[0]} was not found on PATH") from None
     if done.returncode != 0:
         with open(log, encoding="utf-8", errors="replace") as fh:
             tail = "".join(fh.readlines()[-30:])

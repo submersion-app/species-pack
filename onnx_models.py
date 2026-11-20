@@ -15,6 +15,11 @@ MODEL_NAME = "model.onnx"
 # reads; a newer onnx package writes 14, which it refuses.
 MAX_IR_VERSION = 13
 
+# Initializers of at most this many values stay 32-bit: single constants
+# such as an epsilon or a scale, which 16 bits could round to zero, for no
+# saving worth having.
+SMALL_CONSTANT = 1
+
 
 def weights_to_float16(model):
     """`model` (an onnx ModelProto, changed in place and returned) with each
@@ -37,9 +42,10 @@ def weights_to_float16(model):
         weights = numpy_helper.to_array(init)
         with np.errstate(over="ignore"):
             narrowed = weights.astype(np.float16)
-        # A weight beyond 16-bit range would become infinite: that one
-        # stays 32-bit.
-        if not np.array_equal(np.isfinite(narrowed), np.isfinite(weights)):
+        # A weight beyond 16-bit range would become infinite, and a single
+        # constant (an epsilon, a scale) could round to zero: those stay
+        # 32-bit.
+        if weights.size <= SMALL_CONSTANT or not np.array_equal(np.isfinite(narrowed), np.isfinite(weights)):
             kept.append(init)
             continue
         half = numpy_helper.from_array(narrowed, f"{init.name}_f16")

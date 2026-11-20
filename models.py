@@ -161,7 +161,8 @@ def _compare_detector(model, outputs_for):
         (cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2),
         reference.xyxy[int(np.argmax(reference.confidence))],
     )
-    if drift > 0.05 or overlap < 0.9:
+    # Written so NaN, which no comparison passes, fails the check.
+    if not (drift <= 0.05 and overlap >= 0.9):
         raise SystemExit(
             f"converted detector differs from the original (score drift {drift:.4f}, box overlap {overlap:.3f})"
         )
@@ -219,7 +220,7 @@ def convert_classifier(out_dir):
     got = np.asarray(next(iter(ml.predict({"image": x.numpy()}).values())), dtype=np.float32)
     ref, got = ref.ravel(), got.ravel()
     cosine = float(ref @ got / (np.linalg.norm(ref) * np.linalg.norm(got)))
-    if cosine < 0.999:
+    if not cosine >= 0.999:
         raise SystemExit(f"converted classifier differs from the original (cosine {cosine:.5f})")
     return target
 

@@ -243,7 +243,8 @@ def _check_converted(name, reference, got):
         (best_got[0] - best_got[2] / 2, best_got[1] - best_got[3] / 2, best_got[2], best_got[3]),
     )
     print(f"{name}: score drift {drift:.4f}, best box overlap {overlap:.3f}")
-    if drift > 0.05 or overlap < 0.9:
+    # Written so NaN, which no comparison passes, fails the check.
+    if not (drift <= 0.05 and overlap >= 0.9):
         raise SystemExit(f"{name}: converted detector differs from the original")
 
 

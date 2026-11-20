@@ -148,6 +148,18 @@ class OnnxRunTests(unittest.TestCase):
                     env=dict(os.environ),
                     log=os.path.join(d, "runner.txt"),
                 )
+    def test_a_runner_that_is_not_installed_stops_with_a_message(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaisesRegex(SystemExit, "not found"):
+                score.run_logged(
+                    ["no-such-flutter-anywhere", "test"],
+                    cwd=d,
+                    env=dict(os.environ),
+                    log=os.path.join(d, "runner.txt"),
+                )
+
 
 
 class EvaluateHelperTests(unittest.TestCase):
