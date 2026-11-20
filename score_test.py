@@ -62,5 +62,48 @@ class MeasuredEntryTests(unittest.TestCase):
         self.assertEqual(naming["levels"], [])
 
 
+class EngineTests(unittest.TestCase):
+    def test_a_core_ml_run_measures_the_swift_and_an_onnx_run_the_dart(self):
+        coreml = [os.path.basename(p) for p in score.source_files("coreml")]
+        onnx = [os.path.basename(p) for p in score.source_files("onnx")]
+        self.assertIn("VisionPipeline.swift", coreml)
+        self.assertNotIn("VisionPipeline.swift", onnx)
+        for dart in ("onnx_pipeline.dart", "pixels.dart", "detector_reading.dart", "flutter_image_decoder.dart"):
+            self.assertIn(dart, onnx)
+        self.assertIn("species_vision_onnx_test.dart", onnx)
+
+    def test_onnx_results_sit_beside_core_mls_not_over_them(self):
+        self.assertEqual(score.results_dir("/w", "coreml"), "/w")
+        self.assertEqual(score.results_dir("/w", "onnx"), os.path.join("/w", "onnx"))
+        self.assertNotEqual(
+            score.run_file("/w", "both", "centreCrop", "v1", "coreml"),
+            score.run_file("/w", "both", "centreCrop", "v1", "onnx"),
+        )
+
+    def test_the_onnx_request_names_everything_the_runner_reads(self):
+        request = score.onnx_request(
+            manifest="/m.json",
+            detectors=["/d1/model.onnx", "/d2/model.onnx"],
+            classifier="/c/model.onnx",
+            fit="centreCrop",
+            detector_boxes=True,
+            photos=["/p/a.jpg"],
+            out="/out.jsonl",
+            library="/lib/libonnxruntime.dylib",
+        )
+        self.assertEqual(
+            sorted(request),
+            ["classifier", "cropFit", "detectorBoxes", "detectors", "manifest", "ortLibrary", "out", "photos"],
+        )
+        self.assertEqual(request["detectors"], ["/d1/model.onnx", "/d2/model.onnx"])
+
+    def test_the_mac_library_is_pinned(self):
+        import ort_library
+
+        self.assertRegex(ort_library.NUPKG_SHA256, r"^[0-9a-f]{64}$")
+        self.assertRegex(ort_library.DYLIB_SHA256, r"^[0-9a-f]{64}$")
+        self.assertTrue(ort_library.NUPKG_URL.startswith("https://api.nuget.org/"))
+
+
 if __name__ == "__main__":
     unittest.main()
