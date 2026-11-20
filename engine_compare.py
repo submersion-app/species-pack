@@ -90,9 +90,12 @@ def compare(reference, other, text_rows, scale, config):
                 lowest = min(lowest, cosine)
             if not cosine >= COSINE_FLOOR:
                 below += 1
+            # Each run at its own crop size: a box the other machine draws
+            # under the size floor is not suggested there.
             side = min(d["pixelWidth"], d["pixelHeight"])
+            other_side = min(match["pixelWidth"], match["pixelHeight"])
             if _outcome(d["embedding"], side, text_rows, scale, config) == _outcome(
-                match["embedding"], side, text_rows, scale, config
+                match["embedding"], other_side, text_rows, scale, config
             ):
                 same += 1
         unmatched += len(got) - len(used)

@@ -292,6 +292,29 @@ class EngineCheckTest(unittest.TestCase):
     def test_onnx_naming_fewer_right_fails(self):
         self.assertFalse(self.check(right=280)["pass"])
 
+    def test_onnx_scores_for_a_pack_with_no_onnx_models_are_refused(self):
+        manifest = self.manifest(onnx=False)
+        with self.assertRaisesRegex(SystemExit, "--trained-onnx"):
+            gate.engine_check(manifest, self.scores(manifest, engine=None), self.scores(manifest, engine="onnx"))
+
+    def test_an_onnx_run_over_other_photos_is_named_as_such(self):
+        manifest = self.manifest()
+        onnx = self.scores(manifest, engine="onnx")
+        del onnx["per_photo"]["0"]
+        with self.assertRaisesRegex(SystemExit, "Core ML and ONNX"):
+            gate.engine_check(manifest, self.scores(manifest, engine=None), onnx)
+
+    def test_scores_from_before_junk_was_recorded_are_refused_with_a_way_on(self):
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            for name in ("results.json", "per_photo.json"):
+                with open(os.path.join(d, name), "w", encoding="utf-8") as fh:
+                    json.dump({gate.SET_KEY: {}}, fh)
+            with self.assertRaisesRegex(SystemExit, "score it again"):
+                gate._run(d)
+
     def test_core_ml_scores_are_refused_as_onnx_ones(self):
         with self.assertRaisesRegex(SystemExit, "not the onnx engine's"):
             self.check(onnx=self.scores(self.manifest(), engine="coreml"))

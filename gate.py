@@ -153,12 +153,13 @@ def confirm_same_base(base_manifest, packs, records):
             raise SystemExit(f"the {label} pack was not trained from the baseline pack's name rows")
 
 
-def confirm_same_photos(*per_photo):
+def confirm_same_photos(*per_photo, runs="baseline, trained and check"):
     """Stops unless every per-photo map covers the same photos, so no
-    comparison quietly drops the ones a stale or partial run missed."""
+    comparison quietly drops the ones a stale or partial run missed.
+    `runs` names them for the message."""
     first = set(per_photo[0])
     if any(set(p) != first for p in per_photo[1:]):
-        raise SystemExit("the baseline, trained and check scores cover different photos")
+        raise SystemExit(f"the {runs} scores cover different photos")
 
 
 def confirm_check_pack(training, held_back, check_eval, trained_eval, trained_training):
@@ -177,6 +178,9 @@ def confirm_check_pack(training, held_back, check_eval, trained_eval, trained_tr
         raise SystemExit(f"--check was named at bars {named_at}, not the trained pack's {shipped}")
 
 
+_NO_ONNX_MODELS = "the trained pack has no ONNX models, so --trained-onnx has nothing to check"
+
+
 def has_onnx_models(manifest):
     return any(f.get("engine") == "onnx" for f in manifest["files"])
 
@@ -190,6 +194,8 @@ def engine_check(manifest, coreml, onnx):
     engine's, on this pack, covering the same photos, at the bars the Core
     ML run chose: the engines are compared at the bars the pack ships."""
     if not has_onnx_models(manifest):
+        if onnx is not None:
+            raise SystemExit(_NO_ONNX_MODELS)
         return None
     if onnx is None:
         raise SystemExit(
@@ -199,7 +205,7 @@ def engine_check(manifest, coreml, onnx):
     confirm_engine(coreml["results"], "coreml", "trained")
     confirm_engine(onnx["results"], "onnx", "--trained-onnx")
     confirm_scored(onnx["results"], manifest, "trained ONNX")
-    confirm_same_photos(coreml["per_photo"], onnx["per_photo"])
+    confirm_same_photos(coreml["per_photo"], onnx["per_photo"], runs="trained pack's Core ML and ONNX")
     onnx_eval = onnx["results"]["evaluations"][SET_KEY]
     named_at = onnx_eval["bars after held-out gate"]
     chosen = coreml["results"]["evaluations"][SET_KEY]["bars after held-out gate"]
@@ -234,6 +240,8 @@ def _read(folder, name):
 
 def _run(folder):
     """One scored run, as engine_check reads it."""
+    if not os.path.exists(os.path.join(folder, "per_junk.json")):
+        raise SystemExit(f"{folder} has no per_junk.json: score it again with this score.py")
     return {
         "results": _read(folder, "results.json"),
         "per_photo": _read(folder, "per_photo.json")[SET_KEY],
@@ -288,6 +296,8 @@ def main(argv=None):
     # Read only for a pack with ONNX models: older Core ML scores have no
     # per_junk.json, and a Core ML only pack gates without it.
     onnx_engine = None
+    if args.trained_onnx is not None and not has_onnx_models(manifests["trained"]):
+        raise SystemExit(_NO_ONNX_MODELS)
     if has_onnx_models(manifests["trained"]):
         onnx_engine = engine_check(
             manifests["trained"],

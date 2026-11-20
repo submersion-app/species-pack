@@ -161,7 +161,7 @@ def main(argv=None):
         gate.confirm_scored(results[engine], manifest, engine)
         per_photo[engine] = _read(folder, "per_photo.json")[args.set_key]
         per_junk[engine] = _read(folder, "per_junk.json")[args.set_key]
-    gate.confirm_same_photos(per_photo["coreml"], per_photo["onnx"])
+    gate.confirm_same_photos(per_photo["coreml"], per_photo["onnx"], runs="Core ML and ONNX")
     confirm_pack_bars(
         manifest, results["coreml"]["evaluations"][args.set_key], results["onnx"]["evaluations"][args.set_key]
     )

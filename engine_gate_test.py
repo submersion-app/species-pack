@@ -67,6 +67,17 @@ class GateTests(unittest.TestCase):
         onnx["fish350"] = {**onnx["fish350"], "named_right": True}
         self.assertTrue(self.check(onnx=onnx)["pass"])
 
+    def test_five_photos_to_none_is_still_noise(self):
+        # Exact McNemar, two-sided: 5 to 0 is p 0.0625, over alpha 0.05.
+        self.assertTrue(self.check(onnx=photos(295, 105))["not fewer named right"]["pass"])
+
+    def test_six_photos_to_none_fails(self):
+        # 6 to 0 is p 0.031.
+        self.assertFalse(self.check(onnx=photos(294, 106))["not fewer named right"]["pass"])
+
+    def test_junk_exactly_at_the_limit_passes(self):
+        self.assertTrue(self.check(onnx_eval=evaluation(junk=0.02))["junk"]["pass"])
+
     def test_a_group_significantly_worse_fails(self):
         coreml = {**photos(300, 100), **photos(40, 10, group="coral")}
         onnx = {**photos(300, 100), **photos(28, 22, group="coral")}
