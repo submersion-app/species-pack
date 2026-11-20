@@ -12,6 +12,8 @@ _spec = importlib.util.spec_from_file_location("gate", os.path.join(_HERE, "gate
 gate = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(gate)
 
+import manifest as mf  # noqa: E402
+
 
 def photo(right, *, group="fish", sample="natural", held_out=True, key="1", sure=False, wrong=False):
     return {
@@ -174,6 +176,41 @@ class SameBaseTest(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "name rows"):
             self.confirm(check_record={"base rows sha256": "e" * 64})
 
+    def test_a_pack_derived_from_a_baseline_with_onnx_models_passes(self):
+        def entry(name, engine, sha):
+            return {"name": name, "engine": engine, "size": 1, "sha256": sha}
+
+        models = [entry("detector-cfd.coreml.zip", "coreml", "d" * 64), entry("detector-cfd.onnx.zip", "onnx", "e" * 64)]
+        shared = {"candidates.json": "a" * 64, "text_embeddings.f16": "b" * 64, "regions.bin": "c" * 64}
+        base = mf.build_manifest(
+            pack_version="2026.11.20.0100",
+            detector_set="both",
+            classifier_id="bioclip-2-vitl14-2957b32",
+            embedding_size=768,
+            files=models + [entry(n, "all", h) for n, h in shared.items()],
+            credits=[],
+            naming={"provisional": True},
+        )
+        trained_files = [
+            {**f, "sha256": "f" * 64} if f["name"] == "text_embeddings.f16" else f for f in base["files"]
+        ]
+        derived = mf.derive_manifest(base, trained_files, pack_version="2026.11.20.0200", credits=[], measured=[])
+        gate.confirm_same_base(base, {"trained": derived}, {"trained": {"base rows sha256": gate.ts.rows_sha256(base)}})
+
+
+class SamePhotosTest(unittest.TestCase):
+    def test_photos_that_moved_half_or_label_are_refused(self):
+        base = {"1": photo(True, key="10"), "2": photo(False, key="20")}
+        for change in ({"held_out": False}, {"sample": "top-up"}, {"group": "ray"}, {"gbif_key": "11"}):
+            with self.subTest(change=change):
+                other = {**base, "1": {**base["1"], **change}}
+                with self.assertRaisesRegex(SystemExit, "split or labels"):
+                    gate.confirm_same_photos(base, other)
+
+    def test_the_same_photos_with_other_results_pass(self):
+        base = {"1": photo(True, key="10")}
+        gate.confirm_same_photos(base, {"1": photo(False, key="10")})
+
 
 class ProvenanceTest(unittest.TestCase):
     FILES = [
@@ -212,6 +249,131 @@ class ProvenanceTest(unittest.TestCase):
             gate.confirm_same_photos(photos, {"1": {}}, dict(photos))
 
 
+class EngineCheckTest(unittest.TestCase):
+    """A trained pack with ONNX models ships only when the ONNX engine
+    names as well as Core ML on it (engine_gate.py)."""
+
+    BARS = CheckPackTest.BARS
+
+    def manifest(self, onnx=True):
+        files = [{"name": "detector-cfd.coreml.zip", "engine": "coreml", "size": 1, "sha256": "d" * 64}]
+        if onnx:
+            files.append({"name": "detector-cfd.onnx.zip", "engine": "onnx", "size": 1, "sha256": "e" * 64})
+        files.append({"name": "text_embeddings.f16", "engine": "all", "size": 1, "sha256": "b" * 64})
+        naming = {
+            "provisional": False,
+            "minOpenScore": 0.1,
+            "suggestScore": 0.7,
+            "suggestScoreNoLocation": 0.8,
+            "confidentScore": 0.93,
+            "confidentScoreNoLocation": 1.01,
+        }
+        return {"packVersion": "v", "files": files, "naming": naming}
+
+    def scores(self, manifest, *, engine, right=300, bars=None, switched_off=()):
+        results = {
+            "pack": manifest["packVersion"],
+            "files": {f["name"]: f["sha256"] for f in manifest["files"]},
+            "evaluations": {
+                gate.SET_KEY: {
+                    "bars after held-out gate": bars or self.BARS,
+                    "fixed bars held out": {"switched off": list(switched_off)},
+                    "junk named (tune, at the chosen bars)": 0.01,
+                }
+            },
+        }
+        if engine:
+            results["engine"] = engine
+        return {
+            "results": results,
+            "per_photo": {str(i): photo(i < right) for i in range(400)},
+            "per_junk": {f"cfd:{i}:0": False for i in range(50)},
+        }
+
+    def check(self, manifest=None, onnx=None, **onnx_changes):
+        manifest = manifest or self.manifest()
+        return gate.engine_check(
+            manifest,
+            self.scores(manifest, engine=None),
+            onnx if onnx is not None else self.scores(manifest, engine="onnx", **onnx_changes),
+        )
+
+    def test_a_pack_without_onnx_models_is_gated_as_before(self):
+        manifest = self.manifest(onnx=False)
+        self.assertIsNone(gate.engine_check(manifest, self.scores(manifest, engine=None), None))
+
+    def test_a_pack_with_onnx_models_needs_the_onnx_scores(self):
+        manifest = self.manifest()
+        with self.assertRaisesRegex(SystemExit, "--trained-onnx"):
+            gate.engine_check(manifest, self.scores(manifest, engine=None), None)
+
+    def test_onnx_scores_that_match_core_ml_pass(self):
+        result = self.check()
+        self.assertTrue(result["pass"], result)
+
+    def test_onnx_naming_fewer_right_fails(self):
+        self.assertFalse(self.check(right=280)["pass"])
+
+    def test_onnx_scores_for_a_pack_with_no_onnx_models_are_refused(self):
+        manifest = self.manifest(onnx=False)
+        with self.assertRaisesRegex(SystemExit, "--trained-onnx"):
+            gate.engine_check(manifest, self.scores(manifest, engine=None), self.scores(manifest, engine="onnx"))
+
+    def test_an_onnx_run_over_other_photos_is_named_as_such(self):
+        manifest = self.manifest()
+        onnx = self.scores(manifest, engine="onnx")
+        del onnx["per_photo"]["0"]
+        with self.assertRaisesRegex(SystemExit, "Core ML and ONNX"):
+            gate.engine_check(manifest, self.scores(manifest, engine=None), onnx)
+
+    def test_scores_from_before_junk_was_recorded_are_refused_with_a_way_on(self):
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            for name in ("results.json", "per_photo.json"):
+                with open(os.path.join(d, name), "w", encoding="utf-8") as fh:
+                    json.dump({gate.SET_KEY: {}}, fh)
+            with self.assertRaisesRegex(SystemExit, "score it again"):
+                gate._run(d)
+
+    def test_core_ml_scores_are_refused_as_onnx_ones(self):
+        with self.assertRaisesRegex(SystemExit, "not the onnx engine's"):
+            self.check(onnx=self.scores(self.manifest(), engine="coreml"))
+
+    def test_an_onnx_run_given_as_the_core_ml_side_is_refused(self):
+        manifest = self.manifest()
+        onnx = self.scores(manifest, engine="onnx")
+        with self.assertRaisesRegex(SystemExit, "not the coreml engine's"):
+            gate.engine_check(manifest, onnx, onnx)
+
+    def test_the_naming_checks_take_core_ml_scores_only(self):
+        gate.confirm_engine({}, "coreml", "trained")
+        gate.confirm_engine({"engine": "coreml"}, "coreml", "trained")
+        with self.assertRaisesRegex(SystemExit, "trained scores are the onnx engine's"):
+            gate.confirm_engine({"engine": "onnx"}, "coreml", "trained")
+
+    def test_onnx_scores_of_another_pack_are_refused(self):
+        with self.assertRaisesRegex(SystemExit, "pack"):
+            self.check(onnx=self.scores({**self.manifest(), "packVersion": "w"}, engine="onnx"))
+
+    def test_runs_both_at_another_pack_s_bars_are_refused(self):
+        # Two runs scored with --naming-from another pack agree with each
+        # other, but not with the bars this pack ships.
+        manifest = self.manifest()
+        other = {**self.BARS, "suggest": 0.6}
+        with self.assertRaisesRegex(SystemExit, "not the pack's"):
+            gate.engine_check(
+                manifest,
+                self.scores(manifest, engine=None, bars=other),
+                self.scores(manifest, engine="onnx", bars=other),
+            )
+
+    def test_onnx_scores_named_at_other_bars_are_refused(self):
+        with self.assertRaisesRegex(SystemExit, "bars"):
+            self.check(bars={**self.BARS, "suggest": 0.6})
+
+
 class VerdictTest(unittest.TestCase):
     def test_ship_only_when_all_pass(self):
         base, trained = build([pair(False, True)] * 30)
@@ -222,6 +384,45 @@ class VerdictTest(unittest.TestCase):
         self.assertEqual(
             set(good) - {"ship"}, {"more_named_right", "confident_bar", "no_group_worse", "junk", "rare_species"}
         )
+
+    def test_a_failing_onnx_engine_check_stops_the_ship(self):
+        base, trained = build([pair(False, True)] * 30)
+        good = gate.verdict(base, trained, GOOD_EVAL, PASSING_RARE, onnx_engine={"pass": True})
+        self.assertTrue(good["ship"])
+        self.assertEqual(good["onnx engine"], {"pass": True})
+        bad = gate.verdict(base, trained, GOOD_EVAL, PASSING_RARE, onnx_engine={"pass": False})
+        self.assertFalse(bad["ship"])
+
+
+class SetKeyTest(unittest.TestCase):
+    """The scores a gate reads are those of the combination the pack ships."""
+
+    def pack(self, detector_set):
+        return mf.build_manifest(
+            pack_version="v",
+            detector_set=detector_set,
+            classifier_id="bioclip-2-vitl14-2957b32",
+            embedding_size=768,
+            files=[],
+            credits=[],
+            naming={"provisional": True},
+        )
+
+    def test_a_single_detector_pack_is_keyed_by_its_detector(self):
+        pack = self.pack("cfd")
+        self.assertEqual(
+            gate.pack_set_key(pack), f"{mf.DETECTORS['cfd']['id']} {pack['classifier']['cropFit']}"
+        )
+
+    def test_a_pair_is_keyed_both(self):
+        pack = self.pack("both")
+        self.assertEqual(gate.pack_set_key(pack), f"both {pack['classifier']['cropFit']}")
+
+    def test_scores_of_another_combination_are_refused(self):
+        pack = self.pack("cfd")
+        gate.confirm_set_key(pack, gate.pack_set_key(pack))
+        with self.assertRaisesRegex(SystemExit, "not the combination this pack ships"):
+            gate.confirm_set_key(pack, "both centreCrop")
 
 
 if __name__ == "__main__":

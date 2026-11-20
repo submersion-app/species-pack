@@ -92,5 +92,117 @@ class BuildOptionsTests(unittest.TestCase):
         self.assertEqual(args.min_images, 50)
 
 
+class _Stub:
+    """Stand-ins for models.py and megalodon.py: each conversion leaves a
+    small file or folder where the real one leaves its model."""
+
+    PACK_CHECKPOINT = "megalodon-2024"
+
+    def __init__(self, work):
+        self.work = work
+
+    def _dir(self, *parts):
+        path = os.path.join(self.work, *parts)
+        os.makedirs(path, exist_ok=True)
+        with open(os.path.join(path, "weights.bin"), "wb") as fh:
+            fh.write(b"w")
+        return path
+
+    def _file(self, *parts):
+        path = os.path.join(self.work, *parts)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as fh:
+            fh.write(b"onnx")
+        return path
+
+    # models.py
+    def fetch_detector(self, work):
+        return os.path.join(work, "detector.pth")
+
+    def convert_detector(self, checkpoint, work):
+        return self._dir("detector.mlpackage")
+
+    def convert_detector_onnx(self, checkpoint, work):
+        return self._file("detector_onnx", "model.onnx")
+
+    def convert_classifier(self, work):
+        return self._dir("classifier.mlpackage")
+
+    def convert_classifier_onnx(self, work):
+        return self._file("classifier_onnx", "model.onnx")
+
+    def zip_model(self, package, dest):
+        import zipfile
+
+        with zipfile.ZipFile(dest, "w") as zf:
+            zf.writestr(os.path.basename(package) + "/weights.bin", b"w")
+        return dest
+
+    # megalodon.py
+    def converted_dir(self, work, name):
+        return os.path.dirname(self._dir("megalodon", "detector.mlpackage"))
+
+    def onnx_model(self, work, name):
+        return self._file("megalodon", "onnx", "model.onnx")
+
+
+class ModelFilesTests(unittest.TestCase):
+    def build(self, *extra):
+        import tempfile
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        out = os.path.join(self.tmp.name, "out")
+        work = os.path.join(self.tmp.name, "work")
+        os.makedirs(out)
+        os.makedirs(work)
+        args = build_pack.parse_args(["--out", out, "--work", work, "--megalodon-work", work, *extra])
+        stub = _Stub(work)
+        return build_pack.model_files(args, models=stub, megalodon_module=stub)
+
+    def test_both_engines_are_built_by_default(self):
+        self.assertEqual(build_pack.parse_args(["--out", "x"]).engines, ["coreml", "onnx"])
+
+    def test_each_model_ships_for_each_engine(self):
+        files = self.build("--detectors", "both")
+        self.assertEqual(
+            sorted((os.path.basename(path), engine) for path, engine in files),
+            sorted(
+                [
+                ("classifier.coreml.zip", "coreml"),
+                ("classifier.onnx.zip", "onnx"),
+                ("detector.coreml.zip", "coreml"),
+                ("detector.onnx.zip", "onnx"),
+            ]
+            + [
+                (f"{manifest.DETECTORS['megalodon']['file']}.coreml.zip", "coreml"),
+                (f"{manifest.DETECTORS['megalodon']['file']}.onnx.zip", "onnx"),
+            ]
+            ),
+        )
+
+    def test_an_onnx_zip_holds_model_onnx_at_its_top(self):
+        import zipfile
+
+        files = dict((os.path.basename(p), p) for p, _ in self.build())
+        with zipfile.ZipFile(files["classifier.onnx.zip"]) as zf:
+            self.assertEqual(zf.namelist(), ["model.onnx"])
+
+    def test_one_engine_can_be_built_alone(self):
+        files = self.build("--engines", "coreml")
+        self.assertEqual({engine for _, engine in files}, {"coreml"})
+
+    def test_an_engine_not_built_leaves_none_of_its_zips(self):
+        self.build()
+        out = os.path.join(self.tmp.name, "out")
+        work = os.path.join(self.tmp.name, "work")
+        args = build_pack.parse_args(
+            ["--out", out, "--work", work, "--megalodon-work", work, "--engines", "coreml"]
+        )
+        stub = _Stub(work)
+        build_pack.model_files(args, models=stub, megalodon_module=stub)
+        self.assertEqual([n for n in os.listdir(out) if n.endswith(".onnx.zip")], [])
+
+
 if __name__ == "__main__":
     unittest.main()

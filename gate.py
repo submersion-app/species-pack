@@ -35,6 +35,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import bars as bar_search  # noqa: E402
+import manifest as pack_manifest  # noqa: E402
 import testset  # noqa: E402
 import training_set as ts  # noqa: E402
 
@@ -105,6 +106,23 @@ def rare_check(check_per_photo, held_back):
     }
 
 
+def pack_set_key(manifest):
+    """score.py's key for the combination a pack ships: its one detector's
+    id, or "both" for the pair, then its classifier's crop fit."""
+    detectors, _ = pack_manifest.pack_detectors(manifest)
+    name = detectors[0]["id"] if len(detectors) == 1 else "both"
+    return f"{name} {manifest['classifier']['cropFit']}"
+
+
+def confirm_set_key(manifest, key):
+    """Stops unless `key` is the combination the pack ships: score.py
+    scores every combination, and the pack's bars apply to each, so a gate
+    read at another one would pass a combination nobody runs."""
+    shipped = pack_set_key(manifest)
+    if key != shipped:
+        raise SystemExit(f"the scores at {key!r} are not the combination this pack ships ({shipped!r})")
+
+
 def confirm_scored(results, manifest, label):
     """Stops unless `results` (score.py's results.json) were scored on the
     pack `manifest` describes: its version and every file's hash, models
@@ -116,6 +134,14 @@ def confirm_scored(results, manifest, label):
         raise SystemExit(f"the {label} scores were made on pack {results.get('pack')}, not {manifest.get('packVersion')}")
     if results["files"] != {f["name"]: f["sha256"] for f in manifest["files"]}:
         raise SystemExit(f"the {label} scores were not made on the {label} pack's files")
+
+
+def confirm_engine(results, engine, label):
+    """Stops unless `results` were scored on `engine`. score.py records the
+    engine; scores from before it did are Core ML's."""
+    found = results.get("engine", "coreml")
+    if found != engine:
+        raise SystemExit(f"the {label} scores are the {found} engine's, not the {engine} engine's")
 
 
 def confirm_training_record(training, manifest, label):
@@ -145,12 +171,28 @@ def confirm_same_base(base_manifest, packs, records):
             raise SystemExit(f"the {label} pack was not trained from the baseline pack's name rows")
 
 
-def confirm_same_photos(*per_photo):
+# What a photo is, as opposed to how a run did on it: these must agree for
+# two runs' results on it to be compared.
+_PHOTO_FACTS = ("held_out", "sample", "group", "gbif_key")
+
+
+def confirm_same_photos(*per_photo, runs="baseline, trained and check"):
     """Stops unless every per-photo map covers the same photos, so no
-    comparison quietly drops the ones a stale or partial run missed."""
+    comparison quietly drops the ones a stale or partial run missed.
+    `runs` names them for the message."""
     first = set(per_photo[0])
     if any(set(p) != first for p in per_photo[1:]):
-        raise SystemExit("the baseline, trained and check scores cover different photos")
+        raise SystemExit(f"the {runs} scores cover different photos")
+    # The same ids are not enough: runs scored on another revision of the
+    # test set can put a photo in the other half, or label it differently,
+    # and a comparison would then pair unlike photos.
+    for photo_id in first:
+        seen = {tuple(p[photo_id].get(k) for k in _PHOTO_FACTS) for p in per_photo}
+        if len(seen) > 1:
+            raise SystemExit(
+                f"the {runs} scores disagree on photo {photo_id}'s split or labels; "
+                "score them on the same test set"
+            )
 
 
 def confirm_check_pack(training, held_back, check_eval, trained_eval, trained_training):
@@ -169,7 +211,47 @@ def confirm_check_pack(training, held_back, check_eval, trained_eval, trained_tr
         raise SystemExit(f"--check was named at bars {named_at}, not the trained pack's {shipped}")
 
 
-def verdict(baseline, trained, trained_eval, rare):
+_NO_ONNX_MODELS = "the trained pack has no ONNX models, so --trained-onnx has nothing to check"
+
+
+def has_onnx_models(manifest):
+    return any(f.get("engine") == "onnx" for f in manifest["files"])
+
+
+def engine_check(manifest, coreml, onnx):
+    """The ONNX engine's check on the trained pack (engine_gate.check), or
+    None when the pack lists no ONNX files, which gate as before.
+    `coreml` and `onnx` are the pack's two scored runs, each a dict of its
+    "results", "per_photo" and "per_junk" for SET_KEY; `onnx` is None when
+    --trained-onnx was not given. Stops unless the ONNX run is the ONNX
+    engine's, on this pack, covering the same photos, and both runs named at
+    the bars the pack ships: the engines are compared at those bars."""
+    if not has_onnx_models(manifest):
+        if onnx is not None:
+            raise SystemExit(_NO_ONNX_MODELS)
+        return None
+    if onnx is None:
+        raise SystemExit(
+            "the trained pack has ONNX models: score it on the ONNX engine at its own bars "
+            "(score.py --engine onnx --naming-from PACK) and pass that run's folder as --trained-onnx"
+        )
+    confirm_engine(coreml["results"], "coreml", "trained")
+    confirm_engine(onnx["results"], "onnx", "--trained-onnx")
+    confirm_scored(onnx["results"], manifest, "trained ONNX")
+    confirm_same_photos(coreml["per_photo"], onnx["per_photo"], runs="trained pack's Core ML and ONNX")
+    onnx_eval = onnx["results"]["evaluations"][SET_KEY]
+    # Here, not at the top: engine_gate imports this module.
+    import engine_gate
+
+    # Both runs at the bars this pack ships: equal to each other is not
+    # enough, as two runs named from another pack would agree.
+    engine_gate.confirm_pack_bars(manifest, coreml["results"]["evaluations"][SET_KEY], onnx_eval)
+    return engine_gate.check(coreml["per_photo"], onnx["per_photo"], onnx_eval, coreml["per_junk"], onnx["per_junk"])
+
+
+def verdict(baseline, trained, trained_eval, rare, onnx_engine=None):
+    """Every check, and `ship` only when all pass. `onnx_engine` is
+    engine_check's result, None for a pack with no ONNX models."""
     out = {
         "more_named_right": more_named_right(baseline, trained),
         "confident_bar": confident_bar(trained_eval),
@@ -177,6 +259,8 @@ def verdict(baseline, trained, trained_eval, rare):
         "junk": junk(trained_eval),
         "rare_species": rare,
     }
+    if onnx_engine is not None:
+        out["onnx engine"] = onnx_engine
     out["ship"] = all(v["pass"] for v in out.values())
     return out
 
@@ -184,6 +268,17 @@ def verdict(baseline, trained, trained_eval, rare):
 def _read(folder, name):
     with open(os.path.join(folder, name), encoding="utf-8") as fh:
         return json.load(fh)
+
+
+def _run(folder):
+    """One scored run, as engine_check reads it."""
+    if not os.path.exists(os.path.join(folder, "per_junk.json")):
+        raise SystemExit(f"{folder} has no per_junk.json: score it again with this score.py")
+    return {
+        "results": _read(folder, "results.json"),
+        "per_photo": _read(folder, "per_photo.json")[SET_KEY],
+        "per_junk": _read(folder, "per_junk.json")[SET_KEY],
+    }
 
 
 def main(argv=None):
@@ -194,6 +289,11 @@ def main(argv=None):
     parser.add_argument("--baseline-pack", required=True, help="the pack --baseline was scored on")
     parser.add_argument("--trained-pack", required=True, help="the pack --trained was scored on")
     parser.add_argument("--check-pack", required=True, help="the check layer's pack, to confirm what it held back")
+    parser.add_argument(
+        "--trained-onnx",
+        help="the trained pack's ONNX run (score.py --engine onnx --naming-from PACK writes it to <work>/onnx); "
+        "required when the pack has ONNX models",
+    )
     parser.add_argument("--set", default=os.path.join(os.path.dirname(__file__), "testdata", "accuracy_set.csv"))
     args = parser.parse_args(argv)
     held_back = set(ts.held_back_species(testset.read_rows(args.set)))
@@ -206,6 +306,11 @@ def main(argv=None):
     ):
         results[label] = _read(folder, "results.json")
         manifests[label] = _read(pack, "manifest.json")
+        # The naming layer is measured on the combination the pack ships.
+        confirm_set_key(manifests[label], SET_KEY)
+        # The naming checks are measured on Core ML; ONNX joins through
+        # engine_check alone.
+        confirm_engine(results[label], "coreml", label)
         confirm_scored(results[label], manifests[label], label)
     per_photo = {
         label: _read(folder, "per_photo.json")[SET_KEY]
@@ -222,11 +327,23 @@ def main(argv=None):
     confirm_check_pack(
         training["check"], held_back, results["check"]["evaluations"][SET_KEY], trained_eval, training["trained"]
     )
+    # Read only for a pack with ONNX models: older Core ML scores have no
+    # per_junk.json, and a Core ML only pack gates without it.
+    onnx_engine = None
+    if args.trained_onnx is not None and not has_onnx_models(manifests["trained"]):
+        raise SystemExit(_NO_ONNX_MODELS)
+    if has_onnx_models(manifests["trained"]):
+        onnx_engine = engine_check(
+            manifests["trained"],
+            _run(args.trained),
+            None if args.trained_onnx is None else _run(args.trained_onnx),
+        )
     result = verdict(
         per_photo["baseline"],
         per_photo["trained"],
         trained_eval,
         rare_check(per_photo["check"], held_back),
+        onnx_engine,
     )
     with open(os.path.join(args.trained, "gate.json"), "w", encoding="utf-8") as fh:
         json.dump(result, fh, indent=1)

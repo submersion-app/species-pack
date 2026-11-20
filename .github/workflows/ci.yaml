@@ -50,6 +50,7 @@ jobs:
         # torch from its CPU-only index, for the training tests.
         run: |
           python3.14 -m pip install numpy==2.5.5
+          python3.14 -m pip install onnx==1.23.2 onnxruntime==1.28.0
           python3.14 -m pip install torch==2.15.0 --index-url https://download.pytorch.org/whl/cpu
       - name: Run the tests
         working-directory: species-pack

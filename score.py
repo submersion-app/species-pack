@@ -8,8 +8,9 @@ docs/design/specs/2026-11-17-marine-life-two-detectors-design.md).
 
     python -I score.py --pack PACK
 
-Runs the app's own vision pipeline (vision_cli) over every
-photo, the pair through the pipeline's own merge, which must equal
+Runs the app's own vision pipeline over every photo (the Swift vision_cli
+for Core ML; with --engine onnx, the app's Dart ONNX pipeline through its
+scoring runner, results in <work>/onnx), the pair through the pipeline's own merge, which must equal
 boxes.py's on every photo; names each crop with naming.py, chooses bars
 with bars.py on the tune half of the natural sample, gates them on the
 held-out half, and writes report.md and results.json to the work folder.
@@ -60,35 +61,111 @@ def _read_json(path):
         return json.load(fh)
 
 
+ENGINES = ("coreml", "onnx")
+
+# The app's ONNX scoring runner, a Flutter test file that hosts the pipeline.
+ONNX_RUNNER = ("tool", "species_vision_onnx", "species_vision_onnx_test.dart")
+
+# The app's ONNX pipeline (piece 3), which an ONNX run measures in place of
+# the Swift pipeline, and the runner that hosts it.
+ONNX_SOURCES = (
+    ("lib", "features", "species_id", "data", "engines", "onnx", "pipeline", "detector_reading.dart"),
+    ("lib", "features", "species_id", "data", "engines", "onnx", "pipeline", "pixels.dart"),
+    ("lib", "features", "species_id", "data", "engines", "onnx", "pipeline", "onnx_pipeline.dart"),
+    ("lib", "features", "species_id", "data", "engines", "onnx", "flutter_image_decoder.dart"),
+    ("lib", "features", "species_id", "data", "engines", "onnx", "onnx_worker.dart"),
+    ("lib", "features", "species_id", "data", "engines", "onnx", "onnx_worker_core.dart"),
+    ("lib", "features", "species_id", "data", "engines", "onnx", "ort_model_runner.dart"),
+    ("lib", "features", "species_id", "data", "engines", "onnx", "scoring_line.dart"),
+    # VisionModels.fromManifest and CropFit, and the manifest it reads.
+    ("lib", "features", "species_id", "domain", "entities", "vision_analysis.dart"),
+    ("lib", "features", "species_id", "domain", "entities", "species_pack_manifest.dart"),
+    ("packages", "submersion_vision", "lib", "src", "ort", "ort_runtime.dart"),
+    ("packages", "submersion_vision", "lib", "src", "ort", "ort_native.dart"),
+    ("packages", "submersion_vision", "lib", "src", "ort", "ort_c_api.g.dart"),
+    ONNX_RUNNER,
+)
+
+
+def source_files(engine):
+    """The source files a run's output depends on, besides the models: the
+    Swift vision tool and pipeline for Core ML, the app's Dart pipeline and
+    its runner for ONNX."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if engine == "onnx":
+        return [app_repo.app_path(*parts) for parts in ONNX_SOURCES]
+    return [
+        app_repo.app_path(*app_repo.VISION_PIPELINE),
+        os.path.join(here, "vision_cli", "main.swift"),
+        os.path.join(here, "vision_cli", "FlutterShim.swift"),
+    ]
+
+
+def results_dir(work, engine):
+    """Where a run's results.json, per_photo.json and report go: the work
+    folder for Core ML, as always, and `<work>/onnx` for ONNX, so the two
+    sit side by side for engine_gate.py."""
+    return work if engine == "coreml" else os.path.join(work, "onnx")
+
+
+def run_file(work, name, fit, version, engine):
+    """The JSON lines file one run writes."""
+    suffix = "" if engine == "coreml" else "_onnx"
+    return os.path.join(work, "runs", f"{name}_{fit}_{version}{suffix}.jsonl")
+
+
+def onnx_request(*, manifest, detectors, classifier, fit, detector_boxes, photos, out, library):
+    """What the app's ONNX scoring runner reads (its own file says how)."""
+    return {
+        "manifest": manifest,
+        "detectors": list(detectors),
+        "classifier": classifier,
+        "cropFit": fit,
+        "detectorBoxes": detector_boxes,
+        "photos": list(photos),
+        "out": out,
+        "ortLibrary": library,
+    }
+
+
 class Runner:
     """Runs the vision tool once per detector set (the fish detector,
     Megalodon, both) and fitting, cached by pack version, and keeps each
     run's results by photo path. Models come from the pack when it carries
     them; Megalodon otherwise from its converted model in the work folder."""
 
-    def __init__(self, pack, work):
-        self.pack, self.work = pack, work
+    def __init__(self, pack, work, engine="coreml"):
+        if engine not in ENGINES:
+            raise SystemExit(f"unknown engine {engine}")
+        self.pack, self.work, self.engine = pack, work, engine
         with open(os.path.join(pack, "manifest.json"), encoding="utf-8") as fh:
             self.manifest = json.load(fh)
         self.version = self.manifest["packVersion"]
         detectors, self.boxes = pack_manifest.pack_detectors(self.manifest)
         stems = [d["file"] for d in detectors] + ["classifier"]
-        zips = {pack_manifest.model_zip(stem, "coreml") for stem in stems}
+        zips = {pack_manifest.model_zip(stem, engine) for stem in stems}
         # The models' own hashes, so a pack rebuilt under the same version
         # with other models is extracted again rather than read stale.
         self.model_hashes = {f["name"]: f["sha256"] for f in self.manifest["files"] if f["name"] in zips}
-        self.models = os.path.join(work, "models", self.version)
+        self.models = os.path.join(work, "models", self.version, *(() if engine == "coreml" else ("onnx",)))
         source = os.path.join(self.models, "source.json")
         if os.path.exists(self.models) and _read_json(source) != self.model_hashes:
             shutil.rmtree(self.models)
         os.makedirs(self.models, exist_ok=True)
         for stem in stems:
-            pack_manifest.unpack_model(pack, stem, os.path.join(self.models, stem))
+            pack_manifest.unpack_model(pack, stem, os.path.join(self.models, stem), engine=engine)
         with open(source, "w", encoding="utf-8") as fh:
             json.dump(self.model_hashes, fh)
         self.classifier = pack_manifest.model_in(os.path.join(self.models, "classifier"))
-        self.tool = os.path.join(work, "species_vision")
-        subprocess.run([os.path.join(os.path.dirname(__file__), "vision_cli", "build.sh"), self.tool], check=True)
+        if engine == "coreml":
+            self.tool = os.path.join(work, "species_vision")
+            subprocess.run([os.path.join(os.path.dirname(__file__), "vision_cli", "build.sh"), self.tool], check=True)
+            self.library = None
+        else:
+            import ort_library
+
+            self.tool = None
+            self.library = ort_library.macos_library(work)
 
         self.cfd = pack_manifest.DETECTORS["cfd"]["id"]
         self.mega = pack_manifest.DETECTORS["megalodon"]["id"]
@@ -97,7 +174,10 @@ class Runner:
             raise SystemExit(f"{pack} does not carry the fish detector, which every comparison measures")
         if self.mega not in in_pack:
             # A copy of the converted package: the tool deletes what it compiles.
-            in_pack[self.mega] = (dict(megalodon.SETTINGS), os.path.dirname(megalodon.tool_model(work, MEGALODON)))
+            converted = (
+                megalodon.tool_model(work, MEGALODON) if engine == "coreml" else megalodon.onnx_model(work, MEGALODON)
+            )
+            in_pack[self.mega] = (dict(megalodon.SETTINGS), os.path.dirname(converted))
         # Megalodon's checkpoint pins its model when it is not in the pack.
         self.mega_from_pack = self.mega in {d["id"] for d in detectors}
         self.runs = {
@@ -137,26 +217,40 @@ class Runner:
                     self.model_hashes,
                     None if self.mega_from_pack else megalodon.CHECKPOINTS[MEGALODON]["sha256"],
                     # The converted model itself, so converting again reruns.
-                    None if self.mega_from_pack else megalodon.converted_stamp(self.work, MEGALODON),
+                    None if self.mega_from_pack else self._megalodon_stamp(),
+                    self.engine,
+                    # The ONNX Runtime library the runner loads on this Mac.
+                    self._library_pin(),
                 ]
             ).encode()
         )
         here = os.path.dirname(os.path.abspath(__file__))
-        for source in (
-            os.path.join(here, "megalodon.py"),
-            app_repo.app_path(*app_repo.VISION_PIPELINE),
-            os.path.join(here, "vision_cli", "main.swift"),
-            os.path.join(here, "vision_cli", "FlutterShim.swift"),
-        ):
+        for source in (os.path.join(here, "megalodon.py"), *source_files(self.engine)):
             with open(source, "rb") as fh:
                 digest.update(fh.read())
         return digest.hexdigest()
+
+    def _library_pin(self):
+        if self.engine == "coreml":
+            return None
+        import ort_library
+
+        return ort_library.DYLIB_SHA256
+
+    def _megalodon_stamp(self):
+        if self.engine == "coreml":
+            return megalodon.converted_stamp(self.work, MEGALODON)
+        path = megalodon.onnx_model(self.work, MEGALODON)
+        return [os.path.getsize(path), os.path.getmtime(path)]
 
     def analyze(self, name, fit, photos, out, *, detector_boxes=False, timing=None):
         """Runs the vision tool over `photos` into the JSONL file `out`,
         uncached: written to `out`.partial, then renamed. `timing` keeps
         the tool's time and memory readout."""
         os.makedirs(os.path.dirname(out), exist_ok=True)
+        if self.engine == "onnx":
+            self._analyze_onnx(name, fit, photos, out, detector_boxes=detector_boxes, timing=timing)
+            return
         detectors = [arg for i in self.runs[name] for arg in ("--detector", self.model_paths[i])]
         extra = ["--detector-boxes"] if detector_boxes else []
         with open(out + ".partial", "w", encoding="utf-8") as fh, open(timing or os.devnull, "w", encoding="utf-8") as err:
@@ -185,8 +279,35 @@ class Runner:
         self.model_paths = {i: pack_manifest.model_in(os.path.dirname(p)) for i, p in self.model_paths.items()}
         self.classifier = pack_manifest.model_in(os.path.dirname(self.classifier))
 
+    def _analyze_onnx(self, name, fit, photos, out, *, detector_boxes, timing):
+        """The app's own ONNX pipeline over `photos`, through its scoring
+        runner under Flutter's test host, so photos are decoded as the app
+        decodes them."""
+        request_path = out + ".request.json"
+        with open(request_path, "w", encoding="utf-8") as fh:
+            json.dump(
+                onnx_request(
+                    manifest=self.manifests[name],
+                    detectors=[self.model_paths[i] for i in self.runs[name]],
+                    classifier=self.classifier,
+                    fit=fit,
+                    detector_boxes=detector_boxes,
+                    photos=photos,
+                    out=out + ".partial",
+                    library=self.library,
+                ),
+                fh,
+            )
+        run_logged(
+            ["flutter", "test", os.path.join(*ONNX_RUNNER)],
+            cwd=app_repo.app_root(),
+            env={**os.environ, "SPECIES_VISION_REQUEST": request_path},
+            log=timing or out + ".runner.txt",
+        )
+        os.replace(out + ".partial", out)
+
     def run(self, name, fit, photos):
-        out = os.path.join(self.work, "runs", f"{name}_{fit}_{self.version}.jsonl")
+        out = run_file(self.work, name, fit, self.version, self.engine)
         mem = out[: -len(".jsonl")] + ".time.txt"
         key_path = out[: -len(".jsonl")] + ".key"
         key = self._fingerprint(name, fit, photos)
@@ -197,8 +318,7 @@ class Runner:
             with open(key_path, "w", encoding="utf-8") as fh:
                 fh.write(key + "\n")
         with open(mem, encoding="utf-8") as fh:
-            m = re.search(r"(\d+)\s+maximum resident set size", fh.read())
-        self.memory[(name, fit)] = int(m.group(1)) if m else None
+            self.memory[(name, fit)] = peak_memory(self.engine, fh.read())
         results = {}
         with open(out, encoding="utf-8") as fh:
             for line in fh:
@@ -342,13 +462,16 @@ def _photo(work, row):
     return os.path.join(work, "photos", f"{row['source']}_{row['id']}.jpg")
 
 
-def _junk_records(name, results_by_photo, junk_rows, namer, work, fish_cells):
+def _junk_records(name, results_by_photo, junk_rows, namer, work, fish_cells, strict=True):
     """Each junk row named from the detection it labels, found by its box
-    (an intersection over union of 0.9 or more). A single detector's run
-    must find every one of its rows among its own boxes, or the junk check
-    would pass on nothing. In a merged run a row may match a box from
-    either detector, since the other detector's box can have replaced its
-    own, and each merged box counts once however many rows match it."""
+    (an intersection over union of 0.9 or more), and the keys of the rows
+    no box matched. A single detector's Core ML run (`strict`) must find
+    every one of its rows among its own boxes, or the junk check would pass
+    on nothing. The rows were labelled on Core ML's boxes, so another
+    engine's run leaves the ones it moved out, and engine_gate.py bounds
+    how many. In a merged run a row may match a box from either detector,
+    since the other detector's box can have replaced its own, and each
+    merged box counts once however many rows match it."""
     records, missing, used = [], [], set()
     for row in sorted(junk_rows, key=lambda r: (r["id"], r["detector"], int(r["box"]))):
         if name != BOTH and row["detector"] != name:
@@ -371,13 +494,74 @@ def _junk_records(name, results_by_photo, junk_rows, namer, work, fish_cells):
         record = _crop_record(row, detection, namer, junk_cell=cell)
         if record:
             records.append(record)
-    if missing and name != BOTH:
+    if missing and name != BOTH and strict:
         raise SystemExit(f"{name}: {len(missing)} junk rows match no box in this run, for example {missing[:3]}")
-    return records
+    return records, missing
+
+
+def peak_memory(engine, timing):
+    """The run's peak memory from `/usr/bin/time -l`'s output, in bytes; None
+    for an ONNX run, which is not timed that way: there the measured process
+    would be the flutter tool, not the test host running the models."""
+    if engine != "coreml":
+        return None
+    m = re.search(r"(\d+)\s+maximum resident set size", timing)
+    return int(m.group(1)) if m else None
+
+
+def run_logged(command, *, cwd, env, log):
+    """Runs `command` with its output in `log`; when it fails, stops with the
+    output's last lines, so a failing runner says why."""
+    with open(log, "w", encoding="utf-8") as fh:
+        try:
+            done = subprocess.run(command, cwd=cwd, env=env, stdout=fh, stderr=subprocess.STDOUT)
+        except FileNotFoundError:
+            raise SystemExit(f"{command[0]} was not found on PATH") from None
+    if done.returncode != 0:
+        with open(log, encoding="utf-8", errors="replace") as fh:
+            tail = "".join(fh.readlines()[-30:])
+        raise SystemExit(f"{' '.join(command)} failed ({done.returncode}); its output, in {log}:\n{tail}")
+
+
+def junk_named_by_row(held_junk, junk_named):
+    """Each held-out junk crop's row key and whether it was named, for
+    pairing two engines' junk (engine_gate.py)."""
+    return {
+        f"{c['row']['detector']}:{c['row']['id']}:{c['row']['box']}": bool(named)
+        for c, named in zip(held_junk, junk_named, strict=True)
+    }
+
+
+def fixed_bars_held_out(fixed_bars, held_nat, *, min_side):
+    """Whether fixed bars still stand held out on this run (the engine
+    gate's first check), or None when the bars were chosen, not fixed."""
+    if fixed_bars is None:
+        return None
+    _, switched_off = bar_search.held_out_gate(
+        fixed_bars, [c["with"] for c in held_nat], [c["without"] for c in held_nat], min_side=min_side
+    )
+    return {"switched off": switched_off}
+
+
+def absolute_paths(args):
+    """Makes the pack and work folders absolute, in place: the ONNX runner
+    runs in the app's folder, so a relative path would name another one."""
+    args.pack = os.path.abspath(args.pack)
+    args.work = os.path.abspath(args.work)
 
 
 def evaluate(
-    name, results_by_photo, animals, junk_rows, namer, work, min_side, tune, fixed_bars=None, published=None
+    name,
+    results_by_photo,
+    animals,
+    junk_rows,
+    namer,
+    work,
+    min_side,
+    tune,
+    fixed_bars=None,
+    published=None,
+    strict_junk=True,
 ):
     """Every number for one detector (or merged pair) and fitting.
     `results_by_photo` maps a photo path to its detections, each tagged
@@ -400,7 +584,7 @@ def evaluate(
             if record:
                 crops[row["id"]] = record
 
-    junk = _junk_records(name, results_by_photo, junk_rows, namer, work, fish_cells)
+    junk, junk_unmatched = _junk_records(name, results_by_photo, junk_rows, namer, work, fish_cells, strict=strict_junk)
 
     def half(records, want_tune):
         return [c for c in records if (_key(c["row"]) in tune) == want_tune]
@@ -420,6 +604,7 @@ def evaluate(
     gated, switched_off = bar_search.held_out_gate(
         chosen, [c["with"] for c in held_nat], [c["without"] for c in held_nat], min_side=min_side
     )
+    fixed_held_out = fixed_bars_held_out(fixed_bars, held_nat, min_side=min_side)
     if fixed_bars is not None:
         chosen, gated, switched_off = fixed_bars, fixed_bars, []
 
@@ -546,7 +731,8 @@ def evaluate(
             [c["with"] for c in tune_junk], [c["without"] for c in tune_junk], chosen, min_side=min_side
         ),
         "junk named (held-out)": metrics.rate(sum(junk_named), len(junk_named)).__dict__,
-        "junk crops": {"tune": len(tune_junk), "held-out": len(held_junk)},
+        "fixed bars held out": fixed_held_out,
+        "junk crops": {"tune": len(tune_junk), "held-out": len(held_junk), "rows no box matched": len(junk_unmatched)},
         "by group (held-out, natural and top-up)": metrics.breakdown(
             held_rows, lambda r: r["group"], lambda rows: {**recall(rows), **summary([crops[r["id"]] for r in rows if r["id"] in crops])}
         ),
@@ -562,6 +748,9 @@ def evaluate(
         },
         "_all": held_all,
         "_per_photo": per_photo(animals),
+        # Held-out junk crops, by row: whether each was named, for pairing
+        # two engines' junk (engine_gate.py).
+        "_junk_per_photo": junk_named_by_row(held_junk, junk_named),
     }
 
 
@@ -672,11 +861,18 @@ def main(argv=None):
     parser.add_argument("--set", default=os.path.join(os.path.dirname(__file__), "testdata", "accuracy_set.csv"))
     parser.add_argument("--work", default=DEFAULT_WORK)
     parser.add_argument(
+        "--engine",
+        choices=ENGINES,
+        default="coreml",
+        help="the app engine to measure: Core ML (the Swift vision tool) or ONNX (the app's Dart pipeline)",
+    )
+    parser.add_argument(
         "--naming-from",
         metavar="PACK",
         help="name at this pack's bars instead of choosing them (the naming layer's rare-species check)",
     )
     args = parser.parse_args(argv)
+    absolute_paths(args)
     fixed_bars = None
     if args.naming_from:
         with open(os.path.join(args.naming_from, "manifest.json"), encoding="utf-8") as fh:
@@ -701,7 +897,7 @@ def main(argv=None):
         | {("commons", i) for i in testset.tune_ids(junk_rows)}
     )
 
-    runner = Runner(args.pack, args.work)
+    runner = Runner(args.pack, args.work, args.engine)
     namer = Namer(args.pack, runner.manifest)
     min_side = runner.manifest["naming"]["minCropSide"]
     merge_iou, max_boxes = runner.boxes["mergeIoU"], runner.boxes["maxBoxes"]
@@ -711,6 +907,7 @@ def main(argv=None):
     ids = {cfd: [cfd], mega: [mega], BOTH: [cfd, mega]}
 
     results = {
+        "engine": args.engine,
         "pack": runner.version,
         "candidates": len(namer.candidates),
         "classifierId": runner.manifest["classifier"]["id"],
@@ -777,6 +974,7 @@ def main(argv=None):
                 tune,
                 fixed_bars=fixed_bars,
                 published=published,
+                strict_junk=args.engine == "coreml",
             )
             if (
                 fixed_bars is None
@@ -854,14 +1052,18 @@ def main(argv=None):
     }
     results["recommendation"] = metrics.recommend(results["named right per detector"], paired, preference, eligible)
 
-    os.makedirs(args.work, exist_ok=True)
-    with open(os.path.join(args.work, "results.json"), "w", encoding="utf-8") as fh:
+    out_dir = results_dir(args.work, args.engine)
+    os.makedirs(out_dir, exist_ok=True)
+    with open(os.path.join(out_dir, "results.json"), "w", encoding="utf-8") as fh:
         json.dump(results, fh, indent=1, default=str)
-    # Per photo, for comparing two packs on the same photos (gate.py).
-    with open(os.path.join(args.work, "per_photo.json"), "w", encoding="utf-8") as fh:
+    # Per photo, for comparing two packs on the same photos (gate.py) or two
+    # engines on the same pack (engine_gate.py).
+    with open(os.path.join(out_dir, "per_photo.json"), "w", encoding="utf-8") as fh:
         json.dump({key: value["_per_photo"] for key, value in kept.items()}, fh)
-    report.write_report(results, os.path.join(args.work, "report.md"))
-    print(f"wrote {os.path.join(args.work, 'results.json')} and report.md")
+    with open(os.path.join(out_dir, "per_junk.json"), "w", encoding="utf-8") as fh:
+        json.dump({key: value["_junk_per_photo"] for key, value in kept.items()}, fh)
+    report.write_report(results, os.path.join(out_dir, "report.md"))
+    print(f"wrote {os.path.join(out_dir, 'results.json')} and report.md")
     return 0
 
 

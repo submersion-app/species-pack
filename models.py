@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Fetches the two published models, converts them for the app's engines,
+"""Fetches the two published models, converts them for the app's engines
+(Core ML, and ONNX for Android, Windows and Linux),
 and embeds candidate names with the classifier's text tower. The settings
 are the spike's (spec appendix); change them only with a new model id.
 Needs requirements.txt."""
@@ -67,6 +68,26 @@ def convert_detector(checkpoint, out_dir):
     return target
 
 
+def convert_detector_onnx(checkpoint, out_dir):
+    """The detector as an ONNX model with 16-bit weights
+    (`<out_dir>/detector_onnx/model.onnx`), through the package's own
+    exporter, checked against the original on the fixed scene as the Core
+    ML one is."""
+    import onnx
+    from rfdetr import from_checkpoint
+
+    import onnx_models
+
+    model = from_checkpoint(checkpoint)
+    produced = onnx_models.exported_model(str(model.export(output_dir=out_dir, format="onnx", verbose=False)))
+    target_dir = os.path.join(out_dir, "detector_onnx")
+    os.makedirs(target_dir, exist_ok=True)
+    target = os.path.join(target_dir, onnx_models.MODEL_NAME)
+    return onnx_models.save_checked(
+        onnx_models.weights_to_float16(onnx.load(produced)), target, lambda path: check_detector_onnx(model, path)
+    )
+
+
 def _test_scene():
     """Blue water with two fish shapes, 640 pixels square: the detector
     must find at least one, so the comparison is never of noise."""
@@ -90,10 +111,34 @@ def _iou(a, b):
 
 
 def check_detector(model, package):
-    """Compares the converted detector with the original on the test scene:
-    the ten best scores, sorted (queries with near-equal scores may swap
-    places between runtimes), and the best box."""
+    """Compares the converted Core ML detector with the original on the
+    test scene (see `_compare_detector`)."""
     import coremltools as ct
+    import numpy as np
+
+    converted = ct.models.MLModel(package)
+    input_name = converted.get_spec().description.input[0].name
+    _compare_detector(
+        model,
+        lambda x: [np.asarray(v) for v in converted.predict({input_name: x}).values()],
+    )
+
+
+def check_detector_onnx(model, path):
+    """Compares the converted ONNX detector with the original on the test
+    scene, exactly as the Core ML one is compared."""
+    import numpy as np
+
+    import onnx_models
+
+    _compare_detector(model, lambda x: [np.asarray(v) for v in onnx_models.run(path, x)])
+
+
+def _compare_detector(model, outputs_for):
+    """Compares a converted detector (`outputs_for` runs it on a float32
+    `[1, 3, 640, 640]` input) with the original on the test scene: the ten
+    best scores, sorted (queries with near-equal scores may swap places
+    between runtimes), and the best box."""
     import numpy as np
 
     scene = _test_scene()
@@ -105,9 +150,7 @@ def check_detector(model, package):
     mean = np.array([0.485, 0.456, 0.406])
     std = np.array([0.229, 0.224, 0.225])
     x = ((np.asarray(scene, dtype=np.float32) / 255 - mean) / std).transpose(2, 0, 1)[None]
-    converted = ct.models.MLModel(package)
-    input_name = converted.get_spec().description.input[0].name
-    outputs = [np.asarray(v) for v in converted.predict({input_name: x.astype(np.float32)}).values()]
+    outputs = outputs_for(x.astype(np.float32))
     boxes = next(v for v in outputs if v.shape[-1] == 4).reshape(-1, 4)
     logits = next(v for v in outputs if v.shape[-1] != 4)
     scores = 1 / (1 + np.exp(-logits.reshape(boxes.shape[0], -1).max(axis=1)))
@@ -118,7 +161,8 @@ def check_detector(model, package):
         (cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2),
         reference.xyxy[int(np.argmax(reference.confidence))],
     )
-    if drift > 0.05 or overlap < 0.9:
+    # Written so NaN, which no comparison passes, fails the check.
+    if not (drift <= 0.05 and overlap >= 0.9):
         raise SystemExit(
             f"converted detector differs from the original (score drift {drift:.4f}, box overlap {overlap:.3f})"
         )
@@ -176,9 +220,42 @@ def convert_classifier(out_dir):
     got = np.asarray(next(iter(ml.predict({"image": x.numpy()}).values())), dtype=np.float32)
     ref, got = ref.ravel(), got.ravel()
     cosine = float(ref @ got / (np.linalg.norm(ref) * np.linalg.norm(got)))
-    if cosine < 0.999:
+    if not cosine >= 0.999:
         raise SystemExit(f"converted classifier differs from the original (cosine {cosine:.5f})")
     return target
+
+
+def convert_classifier_onnx(out_dir):
+    """The image tower as an ONNX model with 16-bit weights
+    (`<out_dir>/classifier_onnx/model.onnx`), checked against the original
+    on the fixed input as the Core ML one is."""
+    import onnx
+    import torch
+
+    import onnx_models
+
+    model, _, _ = _classifier()
+    visual = model.visual.eval()
+    torch.manual_seed(0)
+    x = torch.rand(1, 3, 224, 224)
+    with torch.no_grad():
+        ref = visual(x).numpy()
+    target_dir = os.path.join(out_dir, "classifier_onnx")
+    os.makedirs(target_dir, exist_ok=True)
+    raw = os.path.join(target_dir, "exported.onnx")
+    torch.onnx.export(
+        visual, x, raw, input_names=["image"], output_names=["embedding"], opset_version=17, dynamo=False
+    )
+    converted = onnx_models.weights_to_float16(onnx.load(raw))
+    os.remove(raw)
+
+    def check(path):
+        (got,) = onnx_models.run(path, x.numpy())
+        cosine = onnx_models.cosine(ref, got)
+        if not cosine >= 0.999:
+            raise SystemExit(f"converted ONNX classifier differs from the original (cosine {cosine:.5f})")
+
+    return onnx_models.save_checked(converted, os.path.join(target_dir, onnx_models.MODEL_NAME), check)
 
 
 def text_embeddings(candidates):

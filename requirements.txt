@@ -1,6 +1,8 @@
 coremltools==9.1.dev1
 huggingface_hub==2.4.0
 numpy==2.5.5
+onnx==1.23.2
+onnxruntime==1.28.0
 open_clip_torch==4.2.2
 pillow==13.0.0
 rfdetr==1.12.1

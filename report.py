@@ -99,6 +99,18 @@ def naming_levels_lines(results):
     return lines
 
 
+def speed_row(key, sp):
+    """One run's speed row: its timings always, and its peak memory where it
+    was measured (an ONNX run's is not: the timed process would be the
+    flutter tool)."""
+    mem = sp["peak memory bytes"]
+    return (
+        f"| {key} | {sp['detect ms median'] or 0:.1f}, {sp['detect ms p90'] or 0:.1f} | "
+        f"{sp['embed ms median'] or 0:.1f}, {sp['embed ms p90'] or 0:.1f} | "
+        + (f"{mem / 1e9:.2f} GB |" if mem else "not measured |")
+    )
+
+
 def write_report(results, path):
     """A Markdown summary of results.json, for reading and for the findings."""
     lines = [f"# Accuracy report, pack {results['pack']} ({results['candidates']} candidates)", ""]
@@ -172,12 +184,6 @@ def write_report(results, path):
     lines += ["", "## Speed and memory on this Mac", ""]
     lines += ["| Run | detect ms (median, p90) | embed ms per crop (median, p90) | peak memory of the whole run |"]
     lines += ["| --- | --- | --- | --- |"]
-    for key, sp in results["speed"].items():
-        mem = sp["peak memory bytes"]
-        lines.append(
-            f"| {key} | {sp['detect ms median'] or 0:.1f}, {sp['detect ms p90'] or 0:.1f} | "
-            f"{sp['embed ms median'] or 0:.1f}, {sp['embed ms p90'] or 0:.1f} | "
-            f"{mem / 1e9:.2f} GB |" if mem else f"| {key} | | | |"
-        )
+    lines += [speed_row(key, sp) for key, sp in results["speed"].items()]
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")

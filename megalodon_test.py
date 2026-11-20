@@ -102,6 +102,27 @@ class SettingsTests(unittest.TestCase):
         self.assertIsNot(megalodon.SETTINGS, manifest.DETECTORS["megalodon"])
         self.assertIsNot(megalodon.SETTINGS["mean"], manifest.DETECTORS["megalodon"]["mean"])
 
+class CheckConvertedTests(unittest.TestCase):
+    @staticmethod
+    def output(scores):
+        import numpy as np
+
+        anchors = len(scores)
+        out = np.zeros((1, 5, anchors), dtype=np.float32)
+        out[0, 0, :], out[0, 1, :], out[0, 2, :], out[0, 3, :] = 100, 100, 50, 50
+        out[0, 4, :] = scores
+        return out
+
+    def test_a_matching_conversion_passes(self):
+        reference = self.output([0.9, 0.5, 0.1])
+        megalodon._check_converted("m", reference, reference.copy())
+
+    def test_a_conversion_that_outputs_nan_is_refused(self):
+        reference = self.output([0.9, 0.5, 0.1])
+        got = self.output([float("nan")] * 3)
+        with self.assertRaisesRegex(SystemExit, "differs"):
+            megalodon._check_converted("m", reference, got)
+
 
 if __name__ == "__main__":
     unittest.main()

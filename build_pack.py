@@ -4,7 +4,7 @@
     python3.14 -m venv .venv && .venv/bin/pip install -r requirements.txt
     .venv/bin/python build_pack.py --out build/species_pack [--detectors cfd|megalodon|both]
 
-Writes `manifest.json` and the files the Core ML engine needs: one model
+Writes `manifest.json` and the files the Core ML and ONNX engines need: one model
 per detector (the Community Fish Detector, FathomNet's Megalodon, or both,
 issue #4691), the classifier, and the naming files. GBIF responses and
 converted models are kept in `--work`, so a second run is quick; Megalodon
@@ -103,9 +103,81 @@ def parse_args(argv=None):
         default=50,
         help="present human observations at 0 to 40 m, for species divers record but rarely photograph",
     )
+    parser.add_argument(
+        "--engines",
+        type=lambda value: [e for e in value.split(",") if e],
+        default=["coreml", "onnx"],
+        help="the engines to build models for, comma separated: coreml, onnx (both by default; every published pack carries both)",
+    )
     parser.add_argument("--version", default=default_version())
     parser.add_argument("--skip-models", action="store_true", help="reuse converted models in --work")
     return parser.parse_args(argv)
+
+
+def model_files(args, *, models, megalodon_module):
+    """Converts and zips each detector of the set and the classifier for
+    each of `args.engines` into `args.out`: `[(path, engine)]`, detectors
+    in pool order, then the classifier, per engine. A zip of a detector
+    outside the set, left by an earlier build, is removed: it would be
+    served with this pack's folder though its manifest does not list it."""
+    import onnx_models
+
+    unknown = set(args.engines) - {"coreml", "onnx"}
+    if unknown or not args.engines:
+        raise SystemExit(f"unknown engines: {', '.join(sorted(unknown)) or 'none given'}")
+    detector_set = mf.DETECTOR_SETS[args.detectors]
+    for engine in ("coreml", "onnx"):
+        for detector in mf.DETECTORS.values():
+            stale = os.path.join(args.out, mf.model_zip(detector["file"], engine))
+            if (engine not in args.engines or detector["id"] not in mf.detector_ids(args.detectors)) and os.path.exists(stale):
+                os.remove(stale)
+        # The classifier of an engine this build leaves out is stale too.
+        stale = os.path.join(args.out, mf.model_zip("classifier", engine))
+        if engine not in args.engines and os.path.exists(stale):
+            os.remove(stale)
+    entries = []
+    checkpoint = None
+    if "coreml" in args.engines:
+        classifier_pkg = os.path.join(args.work, "classifier.mlpackage")
+        if not (args.skip_models and os.path.exists(classifier_pkg)):
+            print("converting the classifier for Core ML", flush=True)
+            classifier_pkg = models.convert_classifier(args.work)
+        detector_pkg = os.path.join(args.work, "detector.mlpackage")
+        for key in detector_set:
+            if key == "cfd":
+                if not (args.skip_models and os.path.exists(detector_pkg)):
+                    print("converting the fish detector for Core ML", flush=True)
+                    checkpoint = checkpoint or models.fetch_detector(args.work)
+                    detector_pkg = models.convert_detector(checkpoint, args.work)
+                package = detector_pkg
+            else:
+                folder = megalodon_module.converted_dir(args.megalodon_work, megalodon_module.PACK_CHECKPOINT)
+                package = os.path.join(folder, "detector.mlpackage")
+                if not os.path.exists(package):
+                    raise SystemExit(f"{package} is missing: a pack needs the model package, not only a compiled model")
+            target = os.path.join(args.out, mf.model_zip(mf.DETECTORS[key]["file"], "coreml"))
+            entries.append((models.zip_model(package, target), "coreml"))
+        classifier_zip = os.path.join(args.out, mf.model_zip("classifier", "coreml"))
+        entries.append((models.zip_model(classifier_pkg, classifier_zip), "coreml"))
+    if "onnx" in args.engines:
+        classifier_onnx = os.path.join(args.work, "classifier_onnx", onnx_models.MODEL_NAME)
+        if not (args.skip_models and os.path.exists(classifier_onnx)):
+            print("converting the classifier for ONNX", flush=True)
+            classifier_onnx = models.convert_classifier_onnx(args.work)
+        for key in detector_set:
+            if key == "cfd":
+                detector_onnx = os.path.join(args.work, "detector_onnx", onnx_models.MODEL_NAME)
+                if not (args.skip_models and os.path.exists(detector_onnx)):
+                    print("converting the fish detector for ONNX", flush=True)
+                    checkpoint = checkpoint or models.fetch_detector(args.work)
+                    detector_onnx = models.convert_detector_onnx(checkpoint, args.work)
+            else:
+                detector_onnx = megalodon_module.onnx_model(args.megalodon_work, megalodon_module.PACK_CHECKPOINT)
+            target = os.path.join(args.out, mf.model_zip(mf.DETECTORS[key]["file"], "onnx"))
+            entries.append((onnx_models.zip_onnx(detector_onnx, target), "onnx"))
+        classifier_zip = os.path.join(args.out, mf.model_zip("classifier", "onnx"))
+        entries.append((onnx_models.zip_onnx(classifier_onnx, classifier_zip), "onnx"))
+    return entries
 
 
 def main(argv=None):
@@ -115,35 +187,8 @@ def main(argv=None):
 
     import models
 
-    # 1 and 2: models, one per detector, then the classifier.
-    detector_set = mf.DETECTOR_SETS[args.detectors]
-    detector_pkg = os.path.join(args.work, "detector.mlpackage")
-    classifier_pkg = os.path.join(args.work, "classifier.mlpackage")
-    if not (args.skip_models and os.path.exists(classifier_pkg)):
-        print("converting the classifier", flush=True)
-        classifier_pkg = models.convert_classifier(args.work)
-    # A detector of another set left by an earlier build would be served
-    # with this pack's folder though its manifest does not list it.
-    for detector in mf.DETECTORS.values():
-        stale = os.path.join(args.out, mf.model_zip(detector["file"], "coreml"))
-        if detector["id"] not in mf.detector_ids(args.detectors) and os.path.exists(stale):
-            os.remove(stale)
-    model_files = []
-    for key in detector_set:
-        if key == "cfd":
-            if not (args.skip_models and os.path.exists(detector_pkg)):
-                print("converting the fish detector", flush=True)
-                detector_pkg = models.convert_detector(models.fetch_detector(args.work), args.work)
-            package = detector_pkg
-        else:
-            package = os.path.join(megalodon.converted_dir(args.megalodon_work, megalodon.PACK_CHECKPOINT), "detector.mlpackage")
-            if not os.path.exists(package):
-                raise SystemExit(f"{package} is missing: a pack needs the model package, not only a compiled model")
-        target = os.path.join(args.out, mf.model_zip(mf.DETECTORS[key]["file"], "coreml"))
-        models.zip_model(package, target)
-        model_files.append(target)
-    classifier_zip = os.path.join(args.out, mf.model_zip("classifier", "coreml"))
-    models.zip_model(classifier_pkg, classifier_zip)
+    # 1 and 2: models, one per detector, then the classifier, for each engine.
+    model_entries = model_files(args, models=models, megalodon_module=megalodon)
 
     # 3: candidates.
     with open(app_repo.app_path("assets", "data", "species.json"), encoding="utf-8") as fh:
@@ -198,8 +243,7 @@ def main(argv=None):
 
     # 6: manifest.
     files = [
-        *(mf.file_entry(path, "coreml") for path in model_files),
-        mf.file_entry(classifier_zip, "coreml"),
+        *(mf.file_entry(path, engine) for path, engine in model_entries),
         mf.file_entry(candidates_path, "all"),
         mf.file_entry(embeddings_path, "all"),
         mf.file_entry(regions_path, "all"),
