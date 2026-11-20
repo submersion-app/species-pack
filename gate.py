@@ -171,6 +171,11 @@ def confirm_same_base(base_manifest, packs, records):
             raise SystemExit(f"the {label} pack was not trained from the baseline pack's name rows")
 
 
+# What a photo is, as opposed to how a run did on it: these must agree for
+# two runs' results on it to be compared.
+_PHOTO_FACTS = ("held_out", "sample", "group", "gbif_key")
+
+
 def confirm_same_photos(*per_photo, runs="baseline, trained and check"):
     """Stops unless every per-photo map covers the same photos, so no
     comparison quietly drops the ones a stale or partial run missed.
@@ -178,6 +183,16 @@ def confirm_same_photos(*per_photo, runs="baseline, trained and check"):
     first = set(per_photo[0])
     if any(set(p) != first for p in per_photo[1:]):
         raise SystemExit(f"the {runs} scores cover different photos")
+    # The same ids are not enough: runs scored on another revision of the
+    # test set can put a photo in the other half, or label it differently,
+    # and a comparison would then pair unlike photos.
+    for photo_id in first:
+        seen = {tuple(p[photo_id].get(k) for k in _PHOTO_FACTS) for p in per_photo}
+        if len(seen) > 1:
+            raise SystemExit(
+                f"the {runs} scores disagree on photo {photo_id}'s split or labels; "
+                "score them on the same test set"
+            )
 
 
 def confirm_check_pack(training, held_back, check_eval, trained_eval, trained_training):

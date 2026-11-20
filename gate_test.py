@@ -198,6 +198,20 @@ class SameBaseTest(unittest.TestCase):
         gate.confirm_same_base(base, {"trained": derived}, {"trained": {"base rows sha256": gate.ts.rows_sha256(base)}})
 
 
+class SamePhotosTest(unittest.TestCase):
+    def test_photos_that_moved_half_or_label_are_refused(self):
+        base = {"1": photo(True, key="10"), "2": photo(False, key="20")}
+        for change in ({"held_out": False}, {"sample": "top-up"}, {"group": "ray"}, {"gbif_key": "11"}):
+            with self.subTest(change=change):
+                other = {**base, "1": {**base["1"], **change}}
+                with self.assertRaisesRegex(SystemExit, "split or labels"):
+                    gate.confirm_same_photos(base, other)
+
+    def test_the_same_photos_with_other_results_pass(self):
+        base = {"1": photo(True, key="10")}
+        gate.confirm_same_photos(base, {"1": photo(False, key="10")})
+
+
 class ProvenanceTest(unittest.TestCase):
     FILES = [
         {"name": "detector.coreml.zip", "sha256": "d" * 64},

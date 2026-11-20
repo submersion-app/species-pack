@@ -101,5 +101,20 @@ class NamingLevelsTests(unittest.TestCase):
         self.assertEqual([line for line in found if "names only" in line], [])
 
 
+class SpeedRowTests(unittest.TestCase):
+    TIMES = {"detect ms median": 12.0, "detect ms p90": 20.0, "embed ms median": 3.0, "embed ms p90": 5.0}
+
+    def test_an_onnx_run_shows_its_timings_without_a_memory_figure(self):
+        row = report.speed_row("both centreCrop", {**self.TIMES, "peak memory bytes": None})
+        self.assertIn("12.0, 20.0", row)
+        self.assertIn("3.0, 5.0", row)
+        self.assertIn("not measured", row)
+
+    def test_a_core_ml_run_shows_its_memory(self):
+        row = report.speed_row("both centreCrop", {**self.TIMES, "peak memory bytes": 2_000_000_000})
+        self.assertIn("12.0, 20.0", row)
+        self.assertIn("2.00 GB", row)
+
+
 if __name__ == "__main__":
     unittest.main()
