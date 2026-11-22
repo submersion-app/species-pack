@@ -6,6 +6,10 @@ left, as the vision pipeline reports them.
 Standard library only, so its test runs in CI without the model tooling.
 """
 
+# The overlap at or above which two boxes show the same object: the app
+# keeps only the better of two such boxes when it merges the detectors.
+SAME_OBJECT_IOU = 0.5
+
 
 def iou(a, b):
     """Intersection over union of two (x, y, w, h) boxes."""
@@ -29,7 +33,7 @@ def best_match(target, candidates, *, min_iou=0.9):
     return best
 
 
-def merge(runs, *, iou_threshold=0.5, max_boxes=8):
+def merge(runs, *, iou_threshold=SAME_OBJECT_IOU, max_boxes=8):
     """The boxes of several runs pooled, best score first, dropping any box
     that overlaps a kept one at or above `iou_threshold`, up to `max_boxes`.
     Each box is a dict with x, y, w, h and score; other fields ride along."""
@@ -48,7 +52,7 @@ def _plain(box):
     return (box["x"], box["y"], box["w"], box["h"], box["score"])
 
 
-def disagreements(results, *, iou_threshold=0.5, max_boxes=8):
+def disagreements(results, *, iou_threshold=SAME_OBJECT_IOU, max_boxes=8):
     """The photos, sorted, where the app's merged boxes are not `merge` of
     that same run's per-detector boxes, exactly. `results` maps a photo to
     the vision tool's result with `detectorBoxes` and `mergedBoxes`; its

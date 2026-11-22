@@ -462,31 +462,47 @@ def _photo(work, row):
     return os.path.join(work, "photos", f"{row['source']}_{row['id']}.jpg")
 
 
+def _junk_key(row):
+    """A junk row's key: its detector, photo and box."""
+    return f"{row['detector']}:{row['id']}:{row['box']}"
+
+
+def _rect(detection):
+    return (detection["x"], detection["y"], detection["w"], detection["h"])
+
+
 def _junk_records(name, results_by_photo, junk_rows, namer, work, fish_cells, strict=True):
     """Each junk row named from the detection it labels, found by its box
-    (an intersection over union of 0.9 or more), and the keys of the rows
-    no box matched. A single detector's Core ML run (`strict`) must find
-    every one of its rows among its own boxes, or the junk check would pass
-    on nothing. The rows were labelled on Core ML's boxes, so another
-    engine's run leaves the ones it moved out, and engine_gate.py bounds
-    how many. In a merged run a row may match a box from either detector,
-    since the other detector's box can have replaced its own, and each
-    merged box counts once however many rows match it."""
-    records, missing, used = [], [], set()
+    (an intersection over union of 0.9 or more); the keys of the rows no
+    box matched; and of those, the rows a box still overlaps as the same
+    object (boxes.SAME_OBJECT_IOU), moved off the labelled box. A single
+    detector's Core ML run (`strict`) must find every one of its rows among
+    its own boxes, or the junk check would pass on nothing. The rows were
+    labelled on Core ML's boxes, so another engine's run leaves out the
+    ones it lost, and engine_gate.py bounds how many: a row the run drew no
+    box over hides nothing it named, a moved one could. In a merged run a
+    row may match a box from either detector, since the other detector's
+    box can have replaced its own, and each merged box counts once however
+    many rows match it; any of the photo's boxes can be a moved one."""
+    records, missing, moved, used = [], [], [], set()
     for row in sorted(junk_rows, key=lambda r: (r["id"], r["detector"], int(r["box"]))):
         if name != BOTH and row["detector"] != name:
             continue
-        key = f"{row['detector']}:{row['id']}:{row['box']}"
+        key = _junk_key(row)
         path = _photo(work, row)
-        detections = [
+        boxes_here = [
             (i, d)
             for i, d in enumerate((results_by_photo.get(path) or {}).get("detections", []))
-            if ((path, i) not in used if name == BOTH else d.get("source") == row["detector"])
+            if name == BOTH or d.get("source") == row["detector"]
         ]
+        detections = [(i, d) for i, d in boxes_here if name != BOTH or (path, i) not in used]
         target = tuple(float(row[k]) for k in ("box_x", "box_y", "box_w", "box_h"))
-        found = box_math.best_match(target, [(d["x"], d["y"], d["w"], d["h"]) for _, d in detections])
+        found = box_math.best_match(target, [_rect(d) for _, d in detections])
         if found is None:
             missing.append(key)
+            near = [_rect(d) for _, d in boxes_here]
+            if box_math.best_match(target, near, min_iou=box_math.SAME_OBJECT_IOU) is not None:
+                moved.append(row)
             continue
         index, detection = detections[found]
         used.add((path, index))
@@ -496,7 +512,7 @@ def _junk_records(name, results_by_photo, junk_rows, namer, work, fish_cells, st
             records.append(record)
     if missing and name != BOTH and strict:
         raise SystemExit(f"{name}: {len(missing)} junk rows match no box in this run, for example {missing[:3]}")
-    return records, missing
+    return records, missing, moved
 
 
 def peak_memory(engine, timing):
@@ -526,10 +542,13 @@ def run_logged(command, *, cwd, env, log):
 def junk_named_by_row(held_junk, junk_named):
     """Each held-out junk crop's row key and whether it was named, for
     pairing two engines' junk (engine_gate.py)."""
-    return {
-        f"{c['row']['detector']}:{c['row']['id']}:{c['row']['box']}": bool(named)
-        for c, named in zip(held_junk, junk_named, strict=True)
-    }
+    return {_junk_key(c["row"]): bool(named) for c, named in zip(held_junk, junk_named, strict=True)}
+
+
+def held_out_moved(moved_rows, tune):
+    """The keys of the held-out junk rows a run moved its box off, sorted,
+    for engine_gate.py to count against the pairing."""
+    return sorted(_junk_key(r) for r in moved_rows if _key(r) not in tune)
 
 
 def fixed_bars_held_out(fixed_bars, held_nat, *, min_side):
@@ -584,7 +603,9 @@ def evaluate(
             if record:
                 crops[row["id"]] = record
 
-    junk, junk_unmatched = _junk_records(name, results_by_photo, junk_rows, namer, work, fish_cells, strict=strict_junk)
+    junk, junk_unmatched, junk_moved = _junk_records(
+        name, results_by_photo, junk_rows, namer, work, fish_cells, strict=strict_junk
+    )
 
     def half(records, want_tune):
         return [c for c in records if (_key(c["row"]) in tune) == want_tune]
@@ -733,6 +754,9 @@ def evaluate(
         "junk named (held-out)": metrics.rate(sum(junk_named), len(junk_named)).__dict__,
         "fixed bars held out": fixed_held_out,
         "junk crops": {"tune": len(tune_junk), "held-out": len(held_junk), "rows no box matched": len(junk_unmatched)},
+        # Held-out junk rows no box matched but one still overlaps as the
+        # same object: engine_gate.py counts these against its pairing.
+        "held-out junk rows moved": held_out_moved(junk_moved, tune),
         "by group (held-out, natural and top-up)": metrics.breakdown(
             held_rows, lambda r: r["group"], lambda rows: {**recall(rows), **summary([crops[r["id"]] for r in rows if r["id"] in crops])}
         ),

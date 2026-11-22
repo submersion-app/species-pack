@@ -113,8 +113,26 @@ class JunkMatchTests(unittest.TestCase):
             score._junk_records("cfd", {}, [self.ROW], None, "/w", [0])
 
     def test_an_onnx_detector_run_leaves_unmatched_junk_rows_out(self):
-        records, missing = score._junk_records("cfd", {}, [self.ROW], None, "/w", [0], strict=False)
-        self.assertEqual((records, missing), ([], ["cfd:7:0"]))
+        records, missing, moved = score._junk_records("cfd", {}, [self.ROW], None, "/w", [0], strict=False)
+        self.assertEqual((records, missing, moved), ([], ["cfd:7:0"], []))
+
+    def _unmatched(self, box, source="cfd"):
+        """The rows recorded as moved when the run's only box is `box`."""
+        detection = dict(zip(("x", "y", "w", "h"), box), source=source)
+        results = {score._photo("/w", self.ROW): {"detections": [detection]}}
+        _, missing, moved = score._junk_records("cfd", results, [self.ROW], None, "/w", [0], strict=False)
+        self.assertEqual(missing, ["cfd:7:0"])
+        return moved
+
+    def test_a_box_the_run_moved_off_a_junk_row_is_recorded(self):
+        # An overlap of about 0.67: the same object, under the 0.9 match.
+        self.assertEqual(self._unmatched((0.14, 0.1, 0.2, 0.2)), [self.ROW])
+
+    def test_a_box_elsewhere_in_the_photo_is_not_a_moved_one(self):
+        self.assertEqual(self._unmatched((0.6, 0.6, 0.2, 0.2)), [])
+
+    def test_another_detectors_box_is_not_a_moved_one(self):
+        self.assertEqual(self._unmatched((0.14, 0.1, 0.2, 0.2), source="mega"), [])
 
 
 class PathTests(unittest.TestCase):
@@ -166,6 +184,13 @@ class EvaluateHelperTests(unittest.TestCase):
     def test_each_held_out_junk_crop_is_paired_with_its_own_result(self):
         crops = [{"row": {"detector": "cfd", "id": "7", "box": "0"}}, {"row": {"detector": "mega", "id": "7", "box": "1"}}]
         self.assertEqual(score.junk_named_by_row(crops, [False, True]), {"cfd:7:0": False, "mega:7:1": True})
+
+    def test_moved_junk_rows_are_listed_held_out_only(self):
+        rows = [
+            {"source": "commons", "id": "7", "detector": "cfd", "box": "0"},
+            {"source": "commons", "id": "8", "detector": "cfd", "box": "2"},
+        ]
+        self.assertEqual(score.held_out_moved(rows, tune={("commons", "8")}), ["cfd:7:0"])
 
     def test_the_held_out_check_is_at_the_fixed_bars_only(self):
         self.assertIsNone(score.fixed_bars_held_out(None, [], min_side=64))
