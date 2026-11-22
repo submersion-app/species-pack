@@ -35,9 +35,11 @@ import gate  # noqa: E402
 
 ALPHA = gate.ALPHA
 JUNK_LIMIT = gate.JUNK_LIMIT
-# The share of held-out junk crops only one engine's run found (its box
-# moved past the 0.9 overlap), left out of the junk pairing, above which the
-# junk check fails: the ones left out could hide junk named.
+# The share of held-out junk crops left out of the junk pairing (only one
+# engine's run found them at the 0.9 overlap) above which the junk check
+# fails, counting only those that could hide junk named: ones only the ONNX
+# run found, and ones it lost with its box moved off rather than gone. A
+# crop the ONNX run drew no box over names nothing there.
 UNPAIRED_JUNK_SHARE = 0.05
 
 
@@ -87,24 +89,30 @@ def junk(onnx_eval, coreml_junk, onnx_junk):
     """The ONNX engine names junk no more than the limit, and not more often
     than Core ML on the same held-out junk crops (paired). A junk crop is
     paired when both runs found its labelled box; one only one run found is
-    left out of the pairing, and the check fails when more than
-    UNPAIRED_JUNK_SHARE of the crops are, or none are paired, since the
-    left-out ones could hide junk named."""
+    left out of the pairing. The check fails when none are paired, or when
+    more than UNPAIRED_JUNK_SHARE of the crops are left out in a way that
+    could hide junk named: found only by ONNX, or lost by ONNX with a box
+    still over the object (score.py's "held-out junk rows moved"). A run
+    that does not record its moved rows has every lost crop counted."""
     rate = onnx_eval["junk named (tune, at the chosen bars)"]
-    keys = sorted(set(coreml_junk) & set(onnx_junk))
-    unpaired = len(set(coreml_junk) ^ set(onnx_junk))
-    every = len(set(coreml_junk) | set(onnx_junk))
+    coreml_keys, onnx_keys = set(coreml_junk), set(onnx_junk)
+    keys = sorted(coreml_keys & onnx_keys)
+    lost = coreml_keys - onnx_keys
+    moved = onnx_eval.get("held-out junk rows moved")
+    counted = (onnx_keys - coreml_keys) | (lost if moved is None else lost & set(moved))
+    every = len(coreml_keys | onnx_keys)
     only_onnx = sum(1 for k in keys if onnx_junk[k] and not coreml_junk[k])
     only_coreml = sum(1 for k in keys if coreml_junk[k] and not onnx_junk[k])
     p = bar_search.mcnemar_p(only_onnx, only_coreml)
     more = p < ALPHA and only_onnx > only_coreml
-    paired_enough = bool(keys) and unpaired <= UNPAIRED_JUNK_SHARE * every
+    paired_enough = bool(keys) and len(counted) <= UNPAIRED_JUNK_SHARE * every
     return {
         "pass": rate <= JUNK_LIMIT and not more and paired_enough,
         "junk named": rate,
         "limit": JUNK_LIMIT,
         "held-out crops": len(keys),
-        "only in one run": unpaired,
+        "only in one run": len(coreml_keys ^ onnx_keys),
+        "counted against the pairing": len(counted),
         "only onnx": only_onnx,
         "only core ml": only_coreml,
         "p": p,

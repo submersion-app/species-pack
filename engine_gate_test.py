@@ -21,11 +21,14 @@ def photos(n_right, n_wrong, group="fish"):
     return out
 
 
-def evaluation(switched_off=(), junk=0.01):
-    return {
+def evaluation(switched_off=(), junk=0.01, moved=None):
+    out = {
         "fixed bars held out": {"switched off": list(switched_off)},
         "junk named (tune, at the chosen bars)": junk,
     }
+    if moved is not None:
+        out["held-out junk rows moved"] = list(moved)
+    return out
 
 
 def junk(named):
@@ -115,6 +118,41 @@ class GateTests(unittest.TestCase):
         for i in range(5):
             del onnx[f"cfd:{i}:0"]
         self.assertFalse(self.check(onnx_junk=onnx)["junk"]["pass"])
+
+    @staticmethod
+    def lost(n):
+        """ONNX's junk with its first `n` crops lost, and their keys."""
+        onnx = junk([False] * 50)
+        keys = [f"cfd:{i}:0" for i in range(n)]
+        for key in keys:
+            del onnx[key]
+        return onnx, keys
+
+    def test_crops_onnx_drew_no_box_over_are_not_counted(self):
+        # It named nothing there, so leaving them out hides nothing.
+        onnx, _ = self.lost(5)
+        result = self.check(onnx_eval=evaluation(moved=[]), onnx_junk=onnx)["junk"]
+        self.assertTrue(result["pass"], result)
+        self.assertEqual((result["only in one run"], result["counted against the pairing"]), (5, 0))
+
+    def test_crops_onnx_moved_its_box_off_are_counted(self):
+        # Its moved box could have named junk the pairing does not see.
+        onnx, keys = self.lost(5)
+        result = self.check(onnx_eval=evaluation(moved=keys), onnx_junk=onnx)["junk"]
+        self.assertFalse(result["pass"])
+        self.assertEqual(result["counted against the pairing"], 5)
+
+    def test_a_run_that_does_not_record_moved_boxes_counts_every_lost_crop(self):
+        onnx, _ = self.lost(5)
+        result = self.check(onnx_eval=evaluation(), onnx_junk=onnx)["junk"]
+        self.assertFalse(result["pass"])
+        self.assertEqual(result["counted against the pairing"], 5)
+
+    def test_crops_only_onnx_found_are_counted(self):
+        coreml, _ = self.lost(5)
+        result = self.check(onnx_eval=evaluation(moved=[]), coreml_junk=coreml)["junk"]
+        self.assertFalse(result["pass"])
+        self.assertEqual(result["counted against the pairing"], 5)
 
 
 class PackBarsTests(unittest.TestCase):
